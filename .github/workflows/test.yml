@@ -20,11 +20,15 @@ jobs:
             if curl -fsS http://127.0.0.1:7860/health >/dev/null; then break; fi
             sleep 1
           done
-      - name: Validate health and manifest
+      - name: Validate empty configuration
         run: |
           curl -fsS http://127.0.0.1:7860/health
           curl -fsS http://127.0.0.1:7860/manifest.json > manifest.json
-          node -e 'const m=require("./manifest.json"); if(m.name!=="Centralyser") throw new Error("Invalid manifest name"); if(!Array.isArray(m.catalogs)||m.catalogs.length===0) throw new Error("No source catalogs loaded"); console.log(`OK: ${m.catalogs.length} catalogs`);'
+          node -e 'const m=require("./manifest.json"); if(m.name!=="Centralyser") throw new Error("Invalid manifest name"); if(!Array.isArray(m.catalogs)) throw new Error("catalogs must be an array"); console.log(`OK: empty state has ${m.catalogs.length} catalogs`);'
+      - name: Validate admin API
+        run: |
+          curl -fsS http://127.0.0.1:7860/api/addons > addons.json
+          node -e 'const d=require("./addons.json"); if(!Array.isArray(d.addons)) throw new Error("Invalid addons response"); console.log(`OK: ${d.addons.length} configured addons`);'
       - name: Show server log on failure
         if: failure()
         run: cat server.log
