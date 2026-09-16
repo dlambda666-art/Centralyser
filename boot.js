@@ -62,6 +62,16 @@ try {
     );
   }
 
+  // Preserve authentication query parameters from tokenized addon manifest URLs.
+  const authMarker = 'u.search = ""; u.hash = "";';
+  if (s.includes(authMarker) && !s.includes('// Preserve authentication query parameters')) {
+    s = s.replace(authMarker, '// Preserve authentication query parameters from the manifest URL.\n  u.hash = "";');
+  }
+
+  // Force a manifest version bump so Nuvio refreshes its cached manifest.
+  s = s.replace('version:"1.0.0"', 'version:"1.0.1"');
+  s = s.replace('version: "1.0.0"', 'version: "1.0.1"');
+
   // Add a convenient copy button without changing addon/catalog behavior.
   const manifestBlock = '<p><a href=\"/manifest.json\" target=\"_blank\">/manifest.json</a></p><p class=\"muted\">À installer une seule fois dans Nuvio.</p>';
   const manifestReplacement = '<p><a href=\"/manifest.json\" target=\"_blank\">Voir le manifest JSON</a></p><p><button class=\"primary\" onclick=\"navigator.clipboard.writeText(location.origin+\'/manifest.json\').then(()=>{this.textContent=\'✅ URL copiée pour Nuvio\';setTimeout(()=>this.textContent=\'📋 Copier l’URL pour Nuvio\',1800)}).catch(()=>alert(location.origin+\'/manifest.json\'))\">📋 Copier l’URL pour Nuvio</button></p><p class=\"muted\">Cette URL reste la même : installe Centralyser une seule fois dans Nuvio.</p>';
