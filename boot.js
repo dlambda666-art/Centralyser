@@ -69,6 +69,29 @@ try {
     s = s.replace("if(d?.meta||(Array.isArray(d?.metas)&&d.metas.length))return json(res,200,better(d))", "if(d?.meta||(Array.isArray(d?.metas)&&d.metas.length)){const data=better(d);responseCache.set(cacheKey,{time:Date.now(),data});return json(res,200,data)}");
   }
 
+  // CORRECTION CRITIQUE : le manifest public ne dépend plus de selectedCatalogs.
+  // Même si la configuration sauvegardée contient une sélection vide après un redémarrage,
+  // tous les catalogues réellement présents dans les manifests sont exposés à Nuvio.
+  const bmStart = s.indexOf('async function buildManifest(){');
+  if (bmStart !== -1) {
+    const bmEnd = s.indexOf('\n}', bmStart) + 2;
+    if (bmEnd > 1) {
+      const buildManifest = `async function buildManifest(){
+  const catalogs=[];
+  const types=new Set();
+  for(const addon of config.addons){
+    try{
+      const m=cache.has(addon.id)?cache.get(addon.id).data:(addon.manifest||await getManifest(addon));
+      (m.types||[]).forEach(t=>types.add(t));
+      for(const c of m.catalogs||[]) catalogs.push({...c,id:\`centralyser__\${addon.id}__\${c.id}\`});
+    }catch(e){console.error(\`[manifest] \${addon.name}: \${e.message}\`)}
+  }
+  return {id:'com.dlambda.centralyser',version:'1.0.0',name:'Centralyser',description:'Hub personnel configurable de catalogues Stremio.',resources:['catalog','meta'],types:[...types],catalogs};
+}`;
+      s = s.slice(0,bmStart) + buildManifest + s.slice(bmEnd);
+    }
+  }
+
   await writeFile(p, s);
 } catch (e) {
   console.error('[boot] patch skipped:', e.message);
