@@ -36,7 +36,7 @@ try {
     try {
       const r = await fetch(url, { headers: { accept: "application/json" }, redirect: "follow", signal: controller.signal });
       if (r.ok) return await r.json();
-      if (![429, 502, 503, 504].includes(r.status) || attempt === 2) throw new Error(\`${r.status} \${r.statusText}\`);
+      if (![429, 502, 503, 504].includes(r.status) || attempt === 2) throw new Error(\`\${r.status} \${r.statusText}\`);
       const retryAfter = Number(r.headers.get("retry-after") || 0);
       const delay = Math.min(Math.max(retryAfter * 1000, 1200 * (attempt + 1)), 6000);
       await new Promise(resolve => setTimeout(resolve, delay));
