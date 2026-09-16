@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 const PORT = Number(process.env.PORT || 7860);
 const MANIFEST_TTL = 60_000;
+const FETCH_TIMEOUT = 15_000;
 const DATA_DIR = process.env.CENTRALYSER_DATA_DIR || "/data";
 const CONFIG_FILE = join(DATA_DIR, "centralyser.json");
 const ADMIN_KEY = process.env.CENTRALYSER_ADMIN_KEY || "";
@@ -32,9 +33,25 @@ async function saveConfig() {
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url, { headers: { accept: "application/json" }, redirect: "follow" });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText} for ${url}`);
-  return response.json();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+  try {
+    const response = await fetch(url, { headers: { accept: "application/json" }, redirect: "follow", signal: controller.signal });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText} for ${url}`);
+    return await response.json();
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`Timeout after ${FETCH_TIMEOUT / 1000}s for ${url}`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function normalizeManifestUrl(value) {
+  const url = new URL(String(value).trim());
+  if (url.pathname === "/" || url.pathname === "") url.pathname = "/manifest.json";
+  else if (url.pathname.endsWith("/")) url.pathname += "manifest.json";
+  return url.toString();
 }
 
 function validateManifest(manifest) {
@@ -133,11 +150,19 @@ function adminAllowed(req, requestUrl) {
 function safeAddon(addon) { return { ...addon, manifest: undefined }; }
 
 async function addonInfo(addon, force = false) {
-  const manifest = await getAddonManifest(addon, force);
-  return { ...safeAddon(addon), manifest: {
-    id: manifest.id || null, name: manifest.name || addon.name, version: manifest.version || null,
-    description: manifest.description || "", types: manifest.types || [], resources: manifest.resources || [], catalogs: manifest.catalogs || [],
-  }};
+  try {
+    const manifest = await getAddonManifest(addon, force);
+    return { ...safeAddon(addon), manifest: {
+      id: manifest.id || null, name: manifest.name || addon.name, version: manifest.version || null,
+      description: manifest.description || "", types: manifest.types || [], resources: manifest.resources || [], catalogs: manifest.catalogs || [],
+    }};
+  } catch (error) {
+    return { ...safeAddon(addon), manifest: {
+      id: null, name: addon.name, version: null,
+      description: `Impossible de lire le manifest: ${error.message}`,
+      types: [], resources: [], catalogs: [],
+    }, error: error.message };
+  }
 }
 
 function readBody(req) {
@@ -159,7 +184,7 @@ const key=localStorage.getItem('centralyserKey')||'';
 async function api(path,opt={}){opt.headers={...(opt.headers||{}),'content-type':'application/json','x-centralyser-key':key};const r=await fetch(path,opt);const d=await r.json();if(!r.ok)throw Error(d.error||r.statusText);return d}
 async function load(){try{const d=await api('/api/addons');render(d.addons)}catch(e){document.getElementById('addons').innerHTML='<p>Erreur: '+esc(e.message)+'</p>'}}
 function esc(s){return String(s??'').replace(/[&<>\\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\\':'&#92;','"':'&quot;'}[c]))}
-function render(addons){if(!addons.length){document.getElementById('addons').innerHTML='<p class="muted">Aucun addon configuré. Ajoute ton premier manifest ci-dessus.</p>';return}document.getElementById('addons').innerHTML=addons.map(a=>{const m=a.manifest||{};const cats=m.catalogs||[];const selected=new Set(a.selectedCatalogs||[]);return '<div class="addon"><h3>'+esc(a.name||m.name||a.manifestUrl)+'</h3><div class="muted">'+esc(a.manifestUrl)+'</div><p>'+esc(m.description||'')+'</p><div class="row"><button onclick="selectAll(\''+a.id+'\',true)">Tout sélectionner</button><button onclick="selectAll(\''+a.id+'\',false)">Tout désélectionner</button><button onclick="refresh(\''+a.id+'\')">Actualiser</button><button onclick="edit(\''+a.id+'\')">Modifier URL</button><button onclick="removeAddon(\''+a.id+'\')">Supprimer</button></div>'+cats.map(c=>'<label class="catalog"><input type="checkbox" '+(selected.has(c.id)?'checked':'')+' onchange="toggle(\''+a.id+'\',\''+esc(c.id)+'\',this.checked)"> '+esc(c.name||c.title||c.id)+' <span class="muted">('+esc(c.type)+')</span></label>').join('')+'</div>'}).join('')}
+function render(addons){if(!addons.length){document.getElementById('addons').innerHTML='<p class="muted">Aucun addon configuré. Ajoute ton premier manifest ci-dessus.</p>';return}document.getElementById('addons').innerHTML=addons.map(a=>{const m=a.manifest||{};const cats=m.catalogs||[];const selected=new Set(a.selectedCatalogs||[]);const error=a.error?'<p>⚠️ '+esc(a.error)+'</p>':'';return '<div class="addon"><h3>'+esc(a.name||m.name||a.manifestUrl)+'</h3><div class="muted">'+esc(a.manifestUrl)+'</div><p>'+esc(m.description||'')+'</p>'+error+'<div class="row"><button onclick="selectAll(\''+a.id+'\',true)">Tout sélectionner</button><button onclick="selectAll(\''+a.id+'\',false)">Tout désélectionner</button><button onclick="refresh(\''+a.id+'\')">Actualiser</button><button onclick="edit(\''+a.id+'\')">Modifier URL</button><button onclick="removeAddon(\''+a.id+'\')">Supprimer</button></div>'+cats.map(c=>'<label class="catalog"><input type="checkbox" '+(selected.has(c.id)?'checked':'')+' onchange="toggle(\''+a.id+'\',\''+esc(c.id)+'\',this.checked)"> '+esc(c.name||c.title||c.id)+' <span class="muted">('+esc(c.type)+')</span></label>').join('')+'</div>'}).join('')}
 async function addAddon(){const url=document.getElementById('url').value.trim();const name=document.getElementById('name').value.trim();if(!url)return alert('Entre une URL de manifest.');try{await api('/api/addons',{method:'POST',body:JSON.stringify({url,name})});document.getElementById('url').value='';document.getElementById('name').value='';document.getElementById('addmsg').textContent=' ✓';load()}catch(e){alert(e.message)}}
 async function toggle(id,catalog,checked){const a=(await api('/api/addons')).addons.find(x=>x.id===id);const s=new Set(a.selectedCatalogs||[]);checked?s.add(catalog):s.delete(catalog);await api('/api/addons/'+id,{method:'PUT',body:JSON.stringify({selectedCatalogs:[...s]})});load()}
 async function selectAll(id,yes){const a=(await api('/api/addons')).addons.find(x=>x.id===id);const ids=yes?(a.manifest.catalogs||[]).map(c=>c.id):[];await api('/api/addons/'+id,{method:'PUT',body:JSON.stringify({selectedCatalogs:ids})});load()}
@@ -175,8 +200,9 @@ async function handleApi(req, res, parts, requestUrl) {
   if (!adminAllowed(req, requestUrl)) return sendJson(res, 401, { error: "Admin key required" });
   if (req.method === "GET" && parts.length === 2) return sendJson(res, 200, { addons: await Promise.all(config.addons.map((a) => addonInfo(a))) });
   if (req.method === "POST" && parts.length === 2) {
-    const body = await readBody(req); const manifestUrl = String(body.url || "").trim();
-    if (!/^https?:\/\//i.test(manifestUrl)) throw new Error("Manifest URL must start with http:// or https://");
+    const body = await readBody(req); const rawUrl = String(body.url || "").trim();
+    if (!/^https?:\/\//i.test(rawUrl)) throw new Error("Manifest URL must start with http:// or https://");
+    const manifestUrl = normalizeManifestUrl(rawUrl);
     const addon = { id: randomUUID().replaceAll("-", "").slice(0, 12), name: String(body.name || "").trim() || manifestUrl, manifestUrl, selectedCatalogs: [] };
     const manifest = validateManifest(await fetchJson(manifestUrl)); config.addons.push(addon); manifestCache.set(addon.id, { time: Date.now(), data: manifest }); await saveConfig();
     return sendJson(res, 201, await addonInfo(addon));
@@ -187,7 +213,7 @@ async function handleApi(req, res, parts, requestUrl) {
     if (req.method === "POST" && parts[3] === "refresh") { const manifest = validateManifest(await fetchJson(addon.manifestUrl)); const valid = new Set((manifest.catalogs || []).map((c) => c.id)); addon.selectedCatalogs = (addon.selectedCatalogs || []).filter((id) => valid.has(id)); manifestCache.set(addon.id, { time: Date.now(), data: manifest }); await saveConfig(); return sendJson(res, 200, await addonInfo(addon, true)); }
     if (req.method === "PUT" && parts.length === 3) {
       const body = await readBody(req); if (body.name !== undefined) addon.name = String(body.name || addon.name);
-      if (body.url !== undefined) { const url = String(body.url || "").trim(); if (!/^https?:\/\//i.test(url)) throw new Error("Manifest URL must start with http:// or https://"); addon.manifestUrl = url; manifestCache.delete(addon.id); await getAddonManifest(addon, true); }
+      if (body.url !== undefined) { const rawUrl = String(body.url || "").trim(); if (!/^https?:\/\//i.test(rawUrl)) throw new Error("Manifest URL must start with http:// or https://"); addon.manifestUrl = normalizeManifestUrl(rawUrl); manifestCache.delete(addon.id); await getAddonManifest(addon, true); }
       if (Array.isArray(body.selectedCatalogs)) addon.selectedCatalogs = [...new Set(body.selectedCatalogs.map(String))]; await saveConfig(); return sendJson(res, 200, await addonInfo(addon));
     }
   }
