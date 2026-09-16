@@ -71,6 +71,8 @@ try {
   // Force a manifest version bump so Nuvio refreshes its cached manifest.
   s = s.replace('version:"1.0.0"', 'version:"1.0.1"');
   s = s.replace('version: "1.0.0"', 'version: "1.0.1"');
+  s = s.replace("version:'1.0.0'", "version:'1.0.1'");
+  s = s.replace("version: '1.0.0'", "version: '1.0.1'");
 
   // Add a convenient copy button without changing addon/catalog behavior.
   const manifestBlock = '<p><a href=\"/manifest.json\" target=\"_blank\">/manifest.json</a></p><p class=\"muted\">À installer une seule fois dans Nuvio.</p>';
