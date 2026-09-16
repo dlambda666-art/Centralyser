@@ -1,51 +1,28 @@
-import http from 'node:http';
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFile, writeFile } from 'node:fs/promises';
 
-// Pass-through du x-ip-token pour les appels vers les Spaces HF.
-const als = new AsyncLocalStorage();
-const originalCreateServer = http.createServer.bind(http);
-http.createServer = function (...args) {
-  if (typeof args[1] === 'function') {
-    const listener = args[1];
-    args[1] = (req, res) => als.run({ xIpToken: req.headers['x-ip-token'] || '' }, () => listener(req, res));
-  }
-  return originalCreateServer(...args);
-};
-
-const originalFetch = globalThis.fetch;
-globalThis.fetch = async (input, init = {}) => {
-  try {
-    const url = new URL(typeof input === 'string' ? input : input.url);
-    if (url.hostname.endsWith('.hf.space')) {
-      const token = als.getStore()?.xIpToken;
-      if (token) {
-        const headers = new Headers(init.headers || (typeof input !== 'string' ? input.headers : undefined));
-        headers.set('x-ip-token', token);
-        init = { ...init, headers };
-      }
-    }
-  } catch {}
-  return originalFetch(input, init);
-};
-
-// Correctif client : les boutons "Tout sélectionner / Tout désélectionner"
-// travaillent directement sur les cases visibles, puis sauvegardent la sélection.
-// Le patch est idempotent et ne modifie pas FrankenStream.
 try {
   const p = './server-fixed.js';
   let s = await readFile(p, 'utf8');
-  const marker = "data-addon-id=\\\"'+esc(a.id)+'\\\"";
-  if (!s.includes(marker)) {
-    s = s.replace(/return '<div class=\\\"addon ok\\\"><h3>/, "return '<div class=\\\"addon ok\\\" data-addon-id=\\\"'+esc(a.id)+'\\\"><h3>");
+
+  // Tous les catalogues présents dans le manifest sont exposés automatiquement.
+  s = s.replace('selectedCatalogs:[]', 'selectedCatalogs:m.catalogs.map(c=>c.id)');
+
+  // Affichage simple : pas de seconde sélection dans Centralyser.
+  const start = s.indexOf('function render(as){');
+  const end = s.indexOf('async function add(){', start);
+  if (start !== -1 && end !== -1) {
+    const render = "function render(as){const box=document.getElementById('addons');document.getElementById('count').textContent=as.length?'('+as.length+')':'';if(!as.length){box.innerHTML='<p class=\"muted\">Aucun addon configuré pour le moment.</p><p class=\"muted\">Ajoute ton premier addon ci-dessus.</p>';return}box.innerHTML=as.map(a=>{const m=a.manifest||{};const n=(m.catalogs||[]).length;return '<div class=\"addon ok\"><h3>✅ '+esc(a.name||m.name||a.manifestUrl)+'</h3><div class=\"muted\">'+esc(a.manifestUrl)+'</div><p>Manifest lu avec succès · <strong>'+n+' catalogue(s) détecté(s) · '+n+' exposé(s) dans Nuvio.</strong></p><div class=\"row\"><button onclick=\"refresh(\\''+a.id+'\\')\">Actualiser</button><button onclick=\"edit(\\''+a.id+'\\')\">Modifier URL</button><button onclick=\"del(\\''+a.id+'\\')\">Supprimer</button></div></div>'}).join('')}";
+    s = s.slice(0,start) + render + '\n' + s.slice(end);
   }
-  const replacement = "async function all(id,on){try{const card=document.querySelector('.addon[data-addon-id=\\\"'+CSS.escape(id)+'\\\"]');if(!card)throw new Error('Addon introuvable dans la page');const boxes=[...card.querySelectorAll('input[type=checkbox]')];boxes.forEach(b=>{b.checked=on});const ids=on?boxes.map(b=>{const m=(b.getAttribute('onchange')||'').match(/toggle\\(\\'[^\\']+\\',\\'([^\\']+)\\'/);return m?m[1]:null}).filter(Boolean):[];await api('/api/addons/'+id,{method:'PUT',body:JSON.stringify({selectedCatalogs:ids})});const status=document.createElement('p');status.className='muted bulk-status';status.textContent=on?'✅ Tous les catalogues sont sélectionnés.':'✅ Tous les catalogues sont désélectionnés.';const previous=card.querySelector('.bulk-status');if(previous)previous.remove();card.querySelector('.row').after(status)}catch(e){alert('Sélection impossible : '+e.message)}}";
-  if (!s.includes("const boxes=[...card.querySelectorAll('input[type=checkbox]')];")) {
-    s = s.replace(/async function all\(id,on\)\{.*?\}\nasync function refresh/s, replacement + '\nasync function refresh');
-  }
+
+  // Les addons déjà enregistrés exposent automatiquement tous leurs catalogues après redémarrage.
+  const marker = 'await loadConfig();';
+  const init = "await loadConfig();\nfor (const a of config.addons) { if (Array.isArray(a.manifest?.catalogs)) a.selectedCatalogs = a.manifest.catalogs.map(c => c.id); }\nif (config.addons.length) await saveConfig();";
+  if (s.includes(marker) && !s.includes('a.manifest?.catalogs')) s = s.replace(marker, init);
+
   await writeFile(p, s);
 } catch (e) {
-  console.error('[boot] UI patch skipped:', e.message);
+  console.error('[boot] patch skipped:', e.message);
 }
 
 await import('./server-fixed.js');
