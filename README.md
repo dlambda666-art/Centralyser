@@ -27,3 +27,5 @@ Centralyser récupère les manifestes des addons configurés et expose leurs cat
 - `/health`
 
 Les réponses de catalogue et de métadonnées des sources sont relayées sans réécriture des objets `meta`, afin de préserver notamment les posters BetterPoster.
+
+<!-- deployment trigger -->
