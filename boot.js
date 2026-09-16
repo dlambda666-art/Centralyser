@@ -20,6 +20,11 @@ try {
   const init = "await loadConfig();\nfor (const a of config.addons) { if (Array.isArray(a.manifest?.catalogs)) a.selectedCatalogs = a.manifest.catalogs.map(c => c.id); }\nif (config.addons.length) await saveConfig();";
   if (s.includes(marker) && !s.includes('a.manifest?.catalogs')) s = s.replace(marker, init);
 
+  // Afficher directement dans Centralyser le lien stable à coller dans Nuvio, avec copie en un clic.
+  const manifestBlock = '<p><a href=\"/manifest.json\" target=\"_blank\">/manifest.json</a></p><p class=\"muted\">À installer une seule fois dans Nuvio.</p>';
+  const manifestReplacement = '<p><a href=\"/manifest.json\" target=\"_blank\">Voir le manifest JSON</a></p><p><button class=\"primary\" onclick=\"navigator.clipboard.writeText(location.origin+\'/manifest.json\').then(()=>{this.textContent=\'✅ URL copiée pour Nuvio\';setTimeout(()=>this.textContent=\'📋 Copier l’URL pour Nuvio\',1800)}).catch(()=>alert(location.origin+\'/manifest.json\'))\">📋 Copier l’URL pour Nuvio</button></p><p class=\"muted\">Cette URL reste la même : installe Centralyser une seule fois dans Nuvio.</p>';
+  if (s.includes(manifestBlock) && !s.includes('Copier l’URL pour Nuvio')) s = s.replace(manifestBlock, manifestReplacement);
+
   await writeFile(p, s);
 } catch (e) {
   console.error('[boot] patch skipped:', e.message);
