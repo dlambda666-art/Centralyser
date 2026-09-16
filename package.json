@@ -4,7 +4,7 @@
   "private": false,
   "type": "module",
   "scripts": {
-    "start": "node boot.js"
+    "start": "node --import ./preload.mjs boot.js"
   },
   "engines": {
     "node": ">=20"
