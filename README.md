@@ -13,6 +13,14 @@ Hub personnel configurable pour les addons de catalogues Stremio.
 
 Centralyser démarre vide : tu ajoutes toi-même les URLs de manifest des addons, tu consultes leurs catalogues et tu choisis ceux que tu veux exposer dans Nuvio. Tu peux ensuite modifier l'URL, actualiser les catalogues, supprimer un addon ou en ajouter d'autres sans réinstaller Centralyser dans Nuvio.
 
+## BetterPoster
+
+BetterPoster est intégré automatiquement. Lorsqu'une fiche contient un identifiant IMDb (`tt...`), Centralyser utilise automatiquement :
+
+`https://btttr.cc/poster-qa/imdb/poster-default/{imdb_id}.jpg?lang=fr`
+
+Aucune installation séparée de BetterPoster comme Custom Art n'est nécessaire pour les catalogues relayés par Centralyser.
+
 ## Utilisation
 
 1. Ouvre la page d'accueil de Centralyser.
@@ -33,9 +41,9 @@ Pour protéger la page de configuration d'un Space public, définir le secret `C
 
 - `/` — interface de configuration
 - `/manifest.json` — manifest Stremio unique à installer dans Nuvio
-- `/catalog/:type/:catalogId.json` — relais des catalogues sélectionnés
-- `/meta/:type/:id.json` — relais des métadonnées
+- `/catalog/:type/:catalogId.json` — relais des catalogues sélectionnés avec BetterPoster automatique
+- `/meta/:type/:id.json` — relais des métadonnées avec BetterPoster automatique
 - `/health` — état du service
 - `/api/addons` — gestion de la configuration
 
-Les réponses de catalogue et de métadonnées sont relayées sans réécriture des objets `meta`, afin de préserver notamment les posters et les données fournies par les addons sources.
+Les données des addons sont conservées, avec uniquement le champ `poster` remplacé automatiquement lorsqu'un identifiant IMDb exploitable est présent.
