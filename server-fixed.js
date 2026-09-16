@@ -49,11 +49,15 @@ function validManifest(m) {
   if (!m || typeof m !== "object") throw new Error("Manifest invalide");
   return { ...m, catalogs: Array.isArray(m.catalogs) ? m.catalogs : [], types: Array.isArray(m.types) ? m.types : [] };
 }
+function manifestInfo(m, addon) {
+  return { id:m.id||null, name:m.name||addon.name, version:m.version||null, description:m.description||"", types:m.types||[], resources:m.resources||[], catalogs:m.catalogs||[] };
+}
 async function getManifest(addon, force = false) {
   const hit = cache.get(addon.id);
   if (!force && hit && Date.now() - hit.time < 60000) return hit.data;
   const data = validManifest(await fetchJson(addon.manifestUrl));
   cache.set(addon.id, { time: Date.now(), data });
+  addon.manifest = manifestInfo(data, addon);
   return data;
 }
 function baseUrl(manifestUrl) {
@@ -86,9 +90,12 @@ function allowed(req, u) { return !ADMIN_KEY || req.headers["x-centralyser-key"]
 function json(res, status, data) { const b = JSON.stringify(data); res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS", "access-control-allow-headers": "content-type,x-centralyser-key" }); res.end(b); }
 function body(req) { return new Promise((resolve, reject) => { let s=""; req.on("data", c => { s += c; if (s.length > 1000000) req.destroy(new Error("Request too large")); }); req.on("end", () => { try { resolve(s ? JSON.parse(s) : {}); } catch { reject(new Error("JSON invalide")); } }); req.on("error", reject); }); }
 async function info(addon) {
+  if (addon.manifest && Array.isArray(addon.manifest.catalogs)) {
+    return { ...addon, manifest: addon.manifest, error:null };
+  }
   try {
     const m = await getManifest(addon);
-    return { ...addon, manifest: { id:m.id||null, name:m.name||addon.name, version:m.version||null, description:m.description||"", types:m.types, resources:m.resources||[], catalogs:m.catalogs }, error:null };
+    return { ...addon, manifest: manifestInfo(m, addon), error:null };
   } catch (e) {
     return { ...addon, manifest: { id:null, name:addon.name, version:null, description:"", types:[], resources:[], catalogs:[] }, error:e.message };
   }
@@ -96,8 +103,11 @@ async function info(addon) {
 async function buildManifest() {
   const catalogs=[]; const types=new Set();
   for (const addon of config.addons) {
-    try { const m=await getManifest(addon); m.types.forEach(t=>types.add(t)); for(const c of m.catalogs){ if((addon.selectedCatalogs||[]).includes(c.id)) catalogs.push({...c,id:`centralyser__${addon.id}__${c.id}`}); } }
-    catch(e){ console.error(`[manifest] ${addon.name}: ${e.message}`); }
+    try {
+      const m=cache.has(addon.id) ? cache.get(addon.id).data : (addon.manifest || await getManifest(addon));
+      (m.types||[]).forEach(t=>types.add(t));
+      for(const c of (m.catalogs||[])) if((addon.selectedCatalogs||[]).includes(c.id)) catalogs.push({...c,id:`centralyser__${addon.id}__${c.id}`});
+    } catch(e){ console.error(`[manifest] ${addon.name}: ${e.message}`); }
   }
   return { id:"com.dlambda.centralyser", version:"1.0.0", name:"Centralyser", description:"Hub personnel configurable de catalogues Stremio.", resources:["catalog","meta"], types:[...types], catalogs };
 }
@@ -123,13 +133,13 @@ http.createServer(async (req,res)=>{const u=new URL(req.url,`http://${req.header
   if(u.pathname==='/manifest.json'&&req.method==='GET')return json(res,200,await buildManifest());
   if(p[0]==='api'&&p[1]==='addons'){
     if(!allowed(req,u))return json(res,401,{error:'Admin key required'});
-    if(req.method==='GET'&&p.length===2)return json(res,200,{addons:await Promise.all(config.addons.map(info))});
-    if(req.method==='POST'&&p.length===2){const b=await body(req);const url=normalizeManifestUrl(b.url);if(config.addons.some(x=>x.manifestUrl===url))return json(res,409,{error:'Cet addon est déjà ajouté.'});const a={id:randomUUID().replaceAll('-','').slice(0,12),name:String(b.name||'').trim()||url,manifestUrl:url,selectedCatalogs:[]};const m=validManifest(await fetchJson(url));cache.set(a.id,{time:Date.now(),data:m});config.addons.push(a);await saveConfig();return json(res,201,await info(a));}
-    if(p.length>=3){const id=p[2],a=findAddon(id);if(!a)return json(res,404,{error:'Addon introuvable'});if(req.method==='DELETE'&&p.length===3){config.addons=config.addons.filter(x=>x.id!==id);cache.delete(id);await saveConfig();return json(res,200,{ok:true})}if(req.method==='POST'&&p[3]==='refresh'){const m=validManifest(await fetchJson(a.manifestUrl));cache.set(id,{time:Date.now(),data:m});a.selectedCatalogs=(a.selectedCatalogs||[]).filter(x=>m.catalogs.some(c=>c.id===x));await saveConfig();return json(res,200,await info(a))}if(req.method==='PUT'&&p.length===3){const b=await body(req);if(b.name!==undefined)a.name=String(b.name||a.name);if(b.url!==undefined){const newUrl=normalizeManifestUrl(b.url);if(config.addons.some(x=>x.id!==id&&x.manifestUrl===newUrl))return json(res,409,{error:'Cet addon est déjà ajouté.'});a.manifestUrl=newUrl;cache.delete(id);await getManifest(a,true)}if(Array.isArray(b.selectedCatalogs))a.selectedCatalogs=[...new Set(b.selectedCatalogs.map(String))];await saveConfig();return json(res,200,await info(a))}}
+    if(req.method==='GET'&&p.length===2)return json(res,200,{addons:config.addons.map(a=>({...a,manifest:a.manifest||{id:null,name:a.name,version:null,description:'',types:[],resources:[],catalogs:[]},error:null}))});
+    if(req.method==='POST'&&p.length===2){const b=await body(req);const url=normalizeManifestUrl(b.url);const a={id:randomUUID().replaceAll('-','').slice(0,12),name:String(b.name||'').trim()||url,manifestUrl:url,selectedCatalogs:[]};const m=validManifest(await fetchJson(url));a.manifest=manifestInfo(m,a);cache.set(a.id,{time:Date.now(),data:m});config.addons.push(a);await saveConfig();return json(res,201,{...a,error:null});}
+    if(p.length>=3){const id=p[2],a=findAddon(id);if(!a)return json(res,404,{error:'Addon introuvable'});if(req.method==='DELETE'&&p.length===3){config.addons=config.addons.filter(x=>x.id!==id);cache.delete(id);await saveConfig();return json(res,200,{ok:true})}if(req.method==='POST'&&p[3]==='refresh'){const m=validManifest(await fetchJson(a.manifestUrl));a.manifest=manifestInfo(m,a);cache.set(id,{time:Date.now(),data:m});a.selectedCatalogs=(a.selectedCatalogs||[]).filter(x=>m.catalogs.some(c=>c.id===x));await saveConfig();return json(res,200,{...a,error:null})}if(req.method==='PUT'&&p.length===3){const b=await body(req);if(b.name!==undefined)a.name=String(b.name||a.name);if(b.url!==undefined){a.manifestUrl=normalizeManifestUrl(b.url);a.manifest=undefined;cache.delete(id);const m=validManifest(await fetchJson(a.manifestUrl));a.manifest=manifestInfo(m,a);cache.set(id,{time:Date.now(),data:m})}if(Array.isArray(b.selectedCatalogs))a.selectedCatalogs=[...new Set(b.selectedCatalogs.map(String))];await saveConfig();return json(res,200,{...a,error:null})}}
     return json(res,404,{error:'Route API inconnue'});
   }
-  if(req.method!=='GET')return json(res,405,{error:'Method not allowed'});
-  if(p[0]==='catalog'&&p.length===3&&p[2].endsWith('.json')){const q=parseCat(decodeURIComponent(p[2].slice(0,-5)));if(!q)return json(res,404,{error:'Unknown catalog'});const a=findAddon(q.addonId);if(!a)return json(res,404,{error:'Unknown addon'});return json(res,200,better(await fetchJson(endpoint(a,'catalog',p[1],q.catalogId,u.searchParams),15000)))}
-  if(p[0]==='meta'&&p.length===3&&p[2].endsWith('.json')){const type=p[1],id=decodeURIComponent(p[2].slice(0,-5));for(const a of config.addons){try{const m=await getManifest(a);const prefixes=m.idPrefixes||[];if(prefixes.length&&!prefixes.some(x=>id.startsWith(x)))continue;const d=await fetchJson(endpoint(a,'meta',type,id,u.searchParams),15000);if(d?.meta||(Array.isArray(d?.metas)&&d.metas.length))return json(res,200,better(d))}catch(e){console.error(`[meta] ${a.name}: ${e.message}`)}}return json(res,200,{meta:null})}
+  if(req.method!=='GET')return json(res,405,{error:'Méthode non autorisée'});
+  if(p[0]==='catalog'&&p.length===3&&p[2].endsWith('.json')){const q=parseCat(decodeURIComponent(p[2].slice(0,-5)));if(!q)return json(res,404,{error:'Catalogue inconnu'});const a=findAddon(q.addonId);if(!a)return json(res,404,{error:'Addon inconnu'});return json(res,200,better(await fetchJson(endpoint(a,'catalog',p[1],q.catalogId,u.searchParams),15000)))}
+  if(p[0]==='meta'&&p.length===3&&p[2].endsWith('.json')){const type=p[1],id=decodeURIComponent(p[2].slice(0,-5));for(const a of config.addons){try{const m=cache.has(a.id)?cache.get(a.id).data:(a.manifest||await getManifest(a));const prefixes=m.idPrefixes||[];if(prefixes.length&&!prefixes.some(x=>id.startsWith(x)))continue;const d=await fetchJson(endpoint(a,'meta',type,id,u.searchParams),15000);if(d?.meta||(Array.isArray(d?.metas)&&d.metas.length))return json(res,200,better(d))}catch(e){console.error(`[meta] ${a.name}: ${e.message}`)}}return json(res,200,{meta:null})}
   return json(res,404,{error:'Not found'});
 }catch(e){console.error(e);return json(res,502,{error:e.message})}}).listen(PORT,'0.0.0.0',()=>console.log(`Centralyser listening on ${PORT}`));
