@@ -25,13 +25,48 @@ try {
   const manifestReplacement = '<p><a href=\"/manifest.json\" target=\"_blank\">Voir le manifest JSON</a></p><p><button class=\"primary\" onclick=\"navigator.clipboard.writeText(location.origin+\'/manifest.json\').then(()=>{this.textContent=\'✅ URL copiée pour Nuvio\';setTimeout(()=>this.textContent=\'📋 Copier l’URL pour Nuvio\',1800)}).catch(()=>alert(location.origin+\'/manifest.json\'))\">📋 Copier l’URL pour Nuvio</button></p><p class=\"muted\">Cette URL reste la même : installe Centralyser une seule fois dans Nuvio.</p>';
   if (s.includes(manifestBlock) && !s.includes('Copier l’URL pour Nuvio')) s = s.replace(manifestBlock, manifestReplacement);
 
-  // Protection anti-429 : un manifest distant peut limiter les requêtes rapprochées.
-  // On respecte Retry-After et on retente au maximum 2 fois, sans boucle agressive.
-  const fetchStart = s.indexOf('async function fetchJson(url) {');
-  const fetchEnd = s.indexOf('\n}\n\nfunction normalizeManifestUrl', fetchStart);
+  // Stabilité réseau : retries 429/5xx, Retry-After et cache court des réponses catalogues/métadonnées.
+  const fetchStart = s.indexOf('async function fetchJson(url, timeout = MANIFEST_TIMEOUT) {');
+  const fetchEnd = s.indexOf('\n}\nfunction validManifest', fetchStart);
   if (fetchStart !== -1 && fetchEnd !== -1) {
-    const fetchReplacement = `async function fetchJson(url) {\n  const controller = new AbortController();\n  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);\n  try {\n    for (let attempt = 0; attempt < 3; attempt++) {\n      const response = await fetch(url, { headers: { accept: \"application/json\" }, redirect: \"follow\", signal: controller.signal });\n      if (response.status !== 429) {\n        if (!response.ok) throw new Error(\`${response.status} \${response.statusText} for \${url}\`);\n        return await response.json();\n      }\n      if (attempt === 2) throw new Error(\`429 Too Many Requests for \${url} (après 3 tentatives)\`);\n      const retryAfter = Number(response.headers.get(\"retry-after\") || 0);\n      const delay = Math.min(Math.max(retryAfter * 1000, 2000), 10000);\n      await new Promise(resolve => setTimeout(resolve, delay));\n    }\n  } catch (error) {\n    if (error?.name === \"AbortError\") throw new Error(\`Timeout after \${FETCH_TIMEOUT / 1000}s for \${url}\`);\n    throw error;\n  } finally {\n    clearTimeout(timer);\n  }\n}`;
+    const fetchReplacement = `async function fetchJson(url, timeout = MANIFEST_TIMEOUT) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      const r = await fetch(url, { headers: { accept: "application/json" }, redirect: "follow", signal: controller.signal });
+      if (r.ok) return await r.json();
+      if (![429, 502, 503, 504].includes(r.status) || attempt === 2) throw new Error(\`${r.status} \${r.statusText}\`);
+      const retryAfter = Number(r.headers.get("retry-after") || 0);
+      const delay = Math.min(Math.max(retryAfter * 1000, 1200 * (attempt + 1)), 6000);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    } catch (e) {
+      if (e?.name === "AbortError") {
+        if (attempt === 2) throw new Error(\`Délai dépassé après \${timeout / 1000}s\`);
+      } else if (attempt === 2) throw e;
+    } finally { clearTimeout(timer); }
+  }
+}`;
     s = s.slice(0, fetchStart) + fetchReplacement + s.slice(fetchEnd + 2);
+  }
+
+  // Éviter que plusieurs requêtes identiques de Nuvio frappent simultanément les addons distants.
+  if (!s.includes('const responseCache = new Map();')) {
+    s = s.replace('const cache = new Map();', 'const cache = new Map();\nconst responseCache = new Map();\nconst RESPONSE_TTL = 30000;');
+  }
+
+  // Cache court des catalogues : les données dynamiques restent fraîches, mais les rafales de Nuvio sont absorbées.
+  const catMarker = "if(p[0]==='catalog'&&p.length===3&&p[2].endsWith('.json')){";
+  if (s.includes(catMarker) && !s.includes('responseCache.get(`catalog:`')) {
+    s = s.replace(catMarker, "if(p[0]==='catalog'&&p.length===3&&p[2].endsWith('.json')){const cacheKey=`catalog:${p[1]}:${p[2]}:${u.search}`;const cached=responseCache.get(cacheKey);if(cached&&Date.now()-cached.time<RESPONSE_TTL)return json(res,200,cached.data);");
+    s = s.replace("return json(res,200,better(await fetchJson(endpoint(a,'catalog',p[1],m[2],u.searchParams),15000)))", "const data=better(await fetchJson(endpoint(a,'catalog',p[1],m[2],u.searchParams),15000));responseCache.set(cacheKey,{time:Date.now(),data});return json(res,200,data)");
+  }
+
+  // Cache court des métadonnées : évite les doubles/triples appels quand Nuvio ouvre une fiche.
+  const metaMarker = "if(p[0]==='meta'&&p.length===3&&p[2].endsWith('.json')){";
+  if (s.includes(metaMarker) && !s.includes('responseCache.get(`meta:`')) {
+    s = s.replace(metaMarker, "if(p[0]==='meta'&&p.length===3&&p[2].endsWith('.json')){const cacheKey=`meta:${p[1]}:${p[2]}:${u.search}`;const cached=responseCache.get(cacheKey);if(cached&&Date.now()-cached.time<RESPONSE_TTL)return json(res,200,cached.data);");
+    s = s.replace("if(d?.meta||(Array.isArray(d?.metas)&&d.metas.length))return json(res,200,better(d))", "if(d?.meta||(Array.isArray(d?.metas)&&d.metas.length)){const data=better(d);responseCache.set(cacheKey,{time:Date.now(),data});return json(res,200,data)}");
   }
 
   await writeFile(p, s);
