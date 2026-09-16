@@ -70,13 +70,10 @@ try {
   }
 
   // CORRECTION CRITIQUE : le manifest public ne dépend plus de selectedCatalogs.
-  // Même si la configuration sauvegardée contient une sélection vide après un redémarrage,
-  // tous les catalogues réellement présents dans les manifests sont exposés à Nuvio.
+  // On remplace la dernière fonction du fichier, ce qui évite toute ambiguïté sur les accolades.
   const bmStart = s.indexOf('async function buildManifest(){');
   if (bmStart !== -1) {
-    const bmEnd = s.indexOf('\n}', bmStart) + 2;
-    if (bmEnd > 1) {
-      const buildManifest = `async function buildManifest(){
+    const buildManifest = `async function buildManifest(){
   const catalogs=[];
   const types=new Set();
   for(const addon of config.addons){
@@ -88,8 +85,7 @@ try {
   }
   return {id:'com.dlambda.centralyser',version:'1.0.0',name:'Centralyser',description:'Hub personnel configurable de catalogues Stremio.',resources:['catalog','meta'],types:[...types],catalogs};
 }`;
-      s = s.slice(0,bmStart) + buildManifest + s.slice(bmEnd);
-    }
+    s = s.slice(0,bmStart) + buildManifest + '\n';
   }
 
   await writeFile(p, s);
