@@ -8,5 +8,6 @@
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "description": "Hub personnel configurable de catalogues Stremio"
 }
