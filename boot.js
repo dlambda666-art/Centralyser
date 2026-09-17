@@ -64,12 +64,6 @@ try {
     );
   }
 
-  // Preserve authentication query parameters from tokenized addon manifest URLs.
-  const authMarker = 'u.search = ""; u.hash = "";';
-  if (s.includes(authMarker) && !s.includes('// Preserve authentication query parameters')) {
-    s = s.replace(authMarker, '// Preserve authentication query parameters from the manifest URL.\n  u.hash = "";');
-  }
-
   // Force a manifest version bump so Nuvio refreshes its cached manifest.
   s = s.replace('version:"1.0.0"', 'version:"1.0.1"');
   s = s.replace('version: "1.0.0"', 'version: "1.0.1"');
