@@ -1,0 +1,19 @@
+name: DuckStreams Lab Check
+
+on:
+  push:
+    branches: [duckstreams-lab]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Syntax check
+        run: node --check server-fixed.js
+      - name: Probe DuckStreams
+        run: node duckstreams-probe.mjs
