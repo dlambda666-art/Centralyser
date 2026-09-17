@@ -56,7 +56,10 @@ function manifestInfo(m, addon) {
   return { id: m.id || null, name: m.name || addon.name, version: m.version || null, description: m.description || "", types: m.types || [], resources: m.resources || [], catalogs: m.catalogs || [], idPrefixes: m.idPrefixes || [] };
 }
 function supportsStream(m) {
-  return Array.isArray(m?.resources) && m.resources.some(r => r === "stream" || (r && typeof r === "object" && r.name === "stream"));
+  if (Array.isArray(m?.resources) && m.resources.some(r => r === "stream" || (r && typeof r === "object" && r.name === "stream"))) return true;
+  const name = String(m?.name || "").toLowerCase();
+  const shortName = String(m?.short_name || "").toLowerCase();
+  return name.includes("aiostream") || shortName.includes("aiostream") || name.includes("duckstreams") || shortName.includes("duckstreams");
 }
 async function getManifest(addon, force = false) {
   const hit = cache.get(addon.id);
