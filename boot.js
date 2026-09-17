@@ -35,18 +35,20 @@ try {
   // Short in-memory cache absorbs duplicate catalog/meta bursts from Nuvio
   // without freezing addon data. FrenchPulse therefore remains live/dynamic.
   if (!s.includes('const responseCache = new Map();')) {
-    s = s.replace('const cache = new Map();', 'const cache = new Map();\nconst responseCache = new Map();\nconst RESPONSE_TTL = 20000;');
+    s = s.replace('const cache = new Map();', 'const cache = new Map();\nconst responseCache = new Map();\nconst inflightCache = new Map();\nconst RESPONSE_TTL = 20000;');
+  } else if (!s.includes('const inflightCache = new Map();')) {
+    s = s.replace('const responseCache = new Map();', 'const responseCache = new Map();\nconst inflightCache = new Map();');
   }
 
   const catMarker = "if(p[0]==='catalog'&&p.length===3&&p[2].endsWith('.json')){";
-  if (s.includes(catMarker) && !s.includes('responseCache.get(`catalog:`')) {
+  if (s.includes(catMarker) && !s.includes('inflightCache.get(cacheKey)')) {
     s = s.replace(
       catMarker,
-      "if(p[0]==='catalog'&&p.length===3&&p[2].endsWith('.json')){const cacheKey=`catalog:${p[1]}:${p[2]}:${u.search}`;const cached=responseCache.get(cacheKey);if(cached&&Date.now()-cached.time<RESPONSE_TTL)return json(res,200,cached.data);"
+      "if(p[0]==='catalog'&&p.length===3&&p[2].endsWith('.json')){const cacheKey=`catalog:${p[1]}:${p[2]}:${u.search}`;const cached=responseCache.get(cacheKey);if(cached&&Date.now()-cached.time<RESPONSE_TTL)return json(res,200,cached.data);const pending=inflightCache.get(cacheKey);if(pending)return json(res,200,await pending);"
     );
     s = s.replace(
       "return json(res,200,better(await fetchJson(endpoint(a,'catalog',p[1],m[2],u.searchParams),15000)))",
-      "const data=better(await fetchJson(endpoint(a,'catalog',p[1],m[2],u.searchParams),15000));responseCache.set(cacheKey,{time:Date.now(),data});return json(res,200,data)"
+      "const pendingRequest=(async()=>{const data=better(await fetchJson(endpoint(a,'catalog',p[1],m[2],u.searchParams),15000));responseCache.set(cacheKey,{time:Date.now(),data});return data})();inflightCache.set(cacheKey,pendingRequest);try{return json(res,200,await pendingRequest)}finally{inflightCache.delete(cacheKey)}"
     );
   }
 
