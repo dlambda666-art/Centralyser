@@ -64,6 +64,7 @@ async function getManifest(addon, force = false) {
   const data = validManifest(await fetchJson(addon.manifestUrl));
   cache.set(addon.id, { time: Date.now(), data });
   addon.manifest = manifestInfo(data, addon);
+  addon.manifest.streamSupported = supportsStream(data);
   return data;
 }
 function baseUrl(manifestUrl) {
