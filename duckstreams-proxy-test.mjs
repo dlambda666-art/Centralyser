@@ -9,7 +9,14 @@ const manifestUrl = `${DUCK}/manifest.json`;
 
 await mkdir(DATA, { recursive: true });
 await writeFile(`${DATA}/centralyser.json`, JSON.stringify({
-  addons: [{ id: "ducktest", name: "DuckStreams Test", manifestUrl, selectedCatalogs: [], streamEnabled: true }]
+  addons: [{
+    id: "ducktest",
+    name: "DuckStreams Test",
+    manifestUrl,
+    selectedCatalogs: [],
+    streamEnabled: true,
+    manifest: { id: "ducktest", name: "DuckStreams Test", resources: ["stream"], types: ["movie"], catalogs: [], idPrefixes: [] }
+  }]
 }, null, 2));
 
 const child = spawn(process.execPath, ["server-fixed.js"], {
