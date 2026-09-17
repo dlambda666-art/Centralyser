@@ -78,6 +78,9 @@ function baseUrl(manifestUrl) {
 }
 function endpoint(addon, kind, type, id, search) {
   const u = new URL(`${baseUrl(addon.manifestUrl)}/${kind}/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`);
+  // Preserve configuration/auth query parameters carried by personalized manifests.
+  const manifestUrl = new URL(addon.manifestUrl);
+  for (const [k, v] of manifestUrl.searchParams) u.searchParams.set(k, v);
   for (const [k, v] of search) u.searchParams.set(k, v);
   return u.toString();
 }
