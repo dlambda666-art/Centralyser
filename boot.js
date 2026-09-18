@@ -35,7 +35,8 @@ try {
   // Short in-memory cache absorbs duplicate catalog/meta bursts from Nuvio
   // without freezing addon data. FrenchPulse therefore remains live/dynamic.
   if (!s.includes('const responseCache = new Map();')) {
-    s = s.replace('const cache = new Map();', 'const cache = new Map();\nconst responseCache = new Map();\nconst inflightCache = new Map();\nconst RESPONSE_TTL = 20000;');
+    s = s.replace('const cache = new Map();', 'const cache = new Map();\nconst responseCache = new Map();\nconst inflightCache = new Map();\nconst RESPONSE_TTL = 20000;
+  const RESPONSE_STALE_TTL = 300000;');
   } else if (!s.includes('const inflightCache = new Map();')) {
     s = s.replace('const responseCache = new Map();', 'const responseCache = new Map();\nconst inflightCache = new Map();');
   }
@@ -48,7 +49,7 @@ try {
     );
     s = s.replace(
       "return json(res,200,better(await fetchJson(endpoint(a,'catalog',p[1],m[2],u.searchParams),15000)))",
-      "const pendingRequest=(async()=>{const data=better(await fetchJson(endpoint(a,'catalog',p[1],m[2],u.searchParams),15000));responseCache.set(cacheKey,{time:Date.now(),data});return data})();inflightCache.set(cacheKey,pendingRequest);try{return json(res,200,await pendingRequest)}finally{inflightCache.delete(cacheKey)}"
+      "const pendingRequest=(async()=>{const data=better(await fetchJson(endpoint(a,'catalog',p[1],m[2],u.searchParams),15000));responseCache.set(cacheKey,{time:Date.now(),data});return data})();inflightCache.set(cacheKey,pendingRequest);try{return json(res,200,await pendingRequest)}catch(e){const stale=responseCache.get(cacheKey);if(stale&&Date.now()-stale.time<RESPONSE_STALE_TTL&&/^(429|502|503|504)\\b/.test(e.message)){console.error('[catalog] upstream transient error; serving stale cache:',e.message);return json(res,200,stale.data)}return json(res,502,{error:e.message})}finally{inflightCache.delete(cacheKey)}"
     );
   }
 
