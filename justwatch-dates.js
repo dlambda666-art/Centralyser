@@ -114,6 +114,89 @@ async function justwatch(tmdbId) {
   return fetchJson(url.toString());
 }
 
+async function justwatchPublicGraphql(title, tmdbId) {
+  const query = `
+    query GetTitleForReleaseDate(
+      $country: Country!,
+      $language: Language!,
+      $first: Int!,
+      $filter: TitleFilter
+    ) {
+      popularTitles(
+        country: $country,
+        filter: $filter,
+        first: $first,
+        sortBy: POPULAR,
+        sortRandomSeed: 0
+      ) {
+        edges {
+          node {
+            id
+            objectType
+            objectId
+            content(country: $country, language: $language) {
+              title
+              originalReleaseYear
+              externalIds {
+                tmdbId
+              }
+              fullPath
+              upcomingReleases(releaseTypes: DIGITAL) {
+                releaseDate
+                package {
+                  shortName
+                  clearName
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+  const body = {
+    operationName: "GetTitleForReleaseDate",
+    variables: {
+      country: REGION,
+      language: "fr",
+      first: 10,
+      filter: {
+        searchQuery: title,
+        objectTypes: ["MOVIE"],
+        includeTitlesWithoutUrl: true
+      }
+    },
+    query
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT);
+  try {
+    const response = await fetch("https://apis.justwatch.com/graphql", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        "user-agent": "Nuvio-JustWatch-Dates/0.1"
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`JustWatch GraphQL ${response.status} ${response.statusText}`);
+    const data = await response.json();
+    if (Array.isArray(data?.errors) && data.errors.length) {
+      throw new Error(data.errors.map(error => error.message).join("; "));
+    }
+    const edges = data?.data?.popularTitles?.edges || [];
+    const matches = edges
+      .map(edge => edge?.node)
+      .filter(node => node?.objectType === "MOVIE")
+      .filter(node => String(node?.content?.externalIds?.tmdbId || "") === String(tmdbId));
+    return matches[0] || null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function enrichMovie(movie) {
   let digitalReleaseDate = null;
   let justWatchPath = null;
@@ -125,9 +208,29 @@ async function enrichMovie(movie) {
       jw = await justwatch(movie.id);
       digitalReleaseDate = extractJwDigitalDate(jw);
       justWatchPath = extractJwPath(jw);
-      if (digitalReleaseDate) dateSource = "JustWatch";
+      if (digitalReleaseDate) dateSource = "JustWatch Partner";
     } catch (error) {
-      console.error(`[justwatch] ${movie.id}: ${error.message}`);
+      console.error(`[justwatch-partner] ${movie.id}: ${error.message}`);
+    }
+  }
+
+  if (!digitalReleaseDate) {
+    try {
+      const publicJw = await justwatchPublicGraphql(
+        movie.title || movie.original_title || "",
+        movie.id
+      );
+      const releases = publicJw?.content?.upcomingReleases || [];
+      const dates = releases
+        .map(item => item?.releaseDate)
+        .filter(value => /^\d{4}-\d{2}-\d{2}/.test(String(value || "")))
+        .map(value => String(value).slice(0, 10))
+        .sort();
+      digitalReleaseDate = dates[0] || null;
+      justWatchPath = publicJw?.content?.fullPath || justWatchPath;
+      if (digitalReleaseDate) dateSource = "JustWatch public";
+    } catch (error) {
+      console.error(`[justwatch-public] ${movie.id}: ${error.message}`);
     }
   }
 
@@ -178,7 +281,7 @@ async function enrichMovie(movie) {
 
 export const manifest = {
   id: "com.dlambda.justwatch-dates",
-  version: "0.1.2",
+  version: "0.1.3",
   name: "JustWatch — Dates numériques",
   description: "Recherche de films et consultation des dates de sortie numérique en Belgique, avec lien direct vers JustWatch.",
   resources: ["catalog", "meta"],
