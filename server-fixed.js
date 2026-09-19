@@ -40,8 +40,19 @@ async function fetchJson(url, timeout = MANIFEST_TIMEOUT) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const r = await fetch(url, { headers: { accept: "application/json" }, redirect: "follow", signal: controller.signal });
-    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    const r = await fetch(url, {
+      headers: {
+        accept: "application/json",
+        "user-agent": "Centralyser/1.0"
+      },
+      redirect: "follow",
+      signal: controller.signal
+    });
+    if (!r.ok) {
+      const retryAfter = r.headers.get("retry-after");
+      if (r.status === 429) console.warn(`[fetch] 429 Too Many Requests for ${url}${retryAfter ? `; retry-after=${retryAfter}` : ""}`);
+      throw new Error(`${r.status} ${r.statusText}`);
+    }
     return await r.json();
   } catch (e) {
     if (e.name === "AbortError") throw new Error(`Délai dépassé après ${timeout / 1000}s en lisant le manifest`);
@@ -77,11 +88,16 @@ function baseUrl(manifestUrl) {
   return u.toString().replace(/\/$/, "");
 }
 function endpoint(addon, kind, type, id, search) {
-  const u = new URL(`${baseUrl(addon.manifestUrl)}/${kind}/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`);
+  const entries = [...search];
+  const extra = kind === 'catalog' && entries.length
+    ? '/' + entries.map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&') + '.json'
+    : '.json';
+  const u = new URL(baseUrl(addon.manifestUrl) + '/' + kind + '/' + encodeURIComponent(type) + '/' + encodeURIComponent(id) + extra);
   // Preserve configuration/auth query parameters carried by personalized manifests.
   const manifestUrl = new URL(addon.manifestUrl);
   for (const [k, v] of manifestUrl.searchParams) u.searchParams.set(k, v);
-  for (const [k, v] of search) u.searchParams.set(k, v);
+  // Non-catalog resources may still carry query parameters.
+  if (kind !== 'catalog') for (const [k, v] of entries) u.searchParams.set(k, v);
   return u.toString();
 }
 function imdbId(item) {
@@ -118,10 +134,10 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 async function api(path,opts={}){opts.headers={...(opts.headers||{}),'content-type':'application/json','x-centralyser-key':key};const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),15000);opts.signal=ctl.signal;try{const r=await fetch(path,opts);let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.error||r.statusText);return d}catch(e){if(e.name==='AbortError')throw new Error('La requête a pris trop de temps.');throw e}finally{clearTimeout(timer)}}
 async function load(){const box=document.getElementById('addons');box.textContent='Chargement de la configuration…';try{const d=await api('/api/addons');render(d.addons||[])}catch(e){box.innerHTML='<p>⚠️ Erreur de chargement : '+esc(e.message)+'</p><button onclick="load()">Réessayer</button>'}}
 function render(as){const box=document.getElementById('addons');document.getElementById('count').textContent=as.length?'('+as.length+')':'';if(!as.length){box.innerHTML='<p class="muted">Aucun addon configuré pour le moment.</p><p class="muted">Ajoute ton premier addon ci-dessus.</p>';return}box.innerHTML=as.map(a=>{const m=a.manifest||{};const sel=new Set(a.selectedCatalogs||[]);const cats=(m.catalogs||[]).map(c=>'<label class="catalog"><input type="checkbox" '+(sel.has(c.id)?'checked':'')+' onchange="toggle(\''+a.id+'\',\''+esc(c.id)+'\',this.checked)"> '+esc(c.name||c.title||c.id)+' <span class="muted">('+esc(c.type||'')+')</span></label>').join('');const stream=m.streamSupported?'<label class="stream"><input type="checkbox" '+(a.streamEnabled?'checked':'')+' onchange="toggleStream(\''+a.id+'\',this.checked)"> ▶️ Utiliser pour les flux</label>':'';return '<div class="addon ok"><h3>✅ '+esc(a.name||m.name||a.manifestUrl)+'</h3><div class="muted">'+esc(a.manifestUrl)+'</div><p>Manifest lu avec succès · '+((m.catalogs||[]).length)+' catalogue(s) détecté(s).</p><div class="row"><button onclick="all(\''+a.id+'\',true)">Tout sélectionner</button><button onclick="all(\''+a.id+'\',false)">Tout désélectionner</button><button onclick="refresh(\''+a.id+'\')">Actualiser</button><button onclick="edit(\''+a.id+'\')">Modifier URL</button><button onclick="del(\''+a.id+'\')">Supprimer</button></div>'+cats+stream+'</div>'}).join('')}
-async function add(){const btn=document.getElementById('addBtn'),status=document.getElementById('addStatus'),url=document.getElementById('url').value.trim(),name=document.getElementById('name').value.trim();status.className='status';status.textContent='';if(!url){status.className='status err';status.textContent='❌ Entre une URL de manifest.';return}btn.disabled=true;btn.textContent='Lecture du manifest…';status.className='status wait';status.textContent='⏳ Lecture et validation du manifest…';try{const r=await api('/api/addons',{method:'POST',body:JSON.stringify({url,name})});document.getElementById('url').value='';document.getElementById('name').value='';status.className='status ok';status.textContent='✅ '+(r.name||name||'Addon')+' a bien été ajouté. Le manifest a été lu.';await load()}catch(e){status.className='status err';status.textContent='❌ Ajout impossible : '+e.message}finally{btn.disabled=false;btn.textContent='Ajouter un autre addon'}}
+async function add(){const btn=document.getElementById('addBtn'),status=document.getElementById('addStatus'),url=document.getElementById('url').value.trim(),name=document.getElementById('name').value.trim();status.className='status';status.textContent='';if(!url){status.className='status err';status.textContent='❌ Entre une URL de manifest.';return}btn.disabled=true;btn.textContent='Lecture du manifest…';status.className='status wait';status.textContent='⏳ Lecture du manifest depuis ton navigateur…';try{let manifest=null;try{const mr=await fetch(url,{headers:{accept:'application/json'},redirect:'follow'});if(!mr.ok)throw new Error('HTTP '+mr.status);manifest=await mr.json()}catch(e){throw new Error('Le manifest est accessible dans le navigateur mais le serveur Centralyser est limité par le fournisseur (429). Réessaie après quelques secondes.')}const r=await api('/api/addons',{method:'POST',body:JSON.stringify({url,name,manifest})});document.getElementById('url').value='';document.getElementById('name').value='';status.className='status ok';status.textContent='✅ '+(r.name||name||'Addon')+' a bien été ajouté sans requête serveur vers le manifest.';await load()}catch(e){status.className='status err';status.textContent='❌ Ajout impossible : '+e.message}finally{btn.disabled=false;btn.textContent='Ajouter un autre addon'}}
 async function toggle(id,c,on){try{const a=(await api('/api/addons')).addons.find(x=>x.id===id);const s=new Set(a.selectedCatalogs||[]);on?s.add(c):s.delete(c);await api('/api/addons/'+id,{method:'PUT',body:JSON.stringify({selectedCatalogs:[...s]})});load()}catch(e){alert('Impossible de modifier le catalogue : '+e.message)}}
 async function toggleStream(id,on){try{await api('/api/addons/'+id,{method:'PUT',body:JSON.stringify({streamEnabled:on})});load()}catch(e){alert('Impossible de modifier le fournisseur de flux : '+e.message)}}
-async function all(id,on){try{const a=(await api('/api/addons')).addons.find(x=>x.id===id);const ids=on?(a.manifest.catalogs||[]).map(c=>c.id):[];await api('/api/addons/'+id,{method:'PUT',body:JSON.stringify({selectedCatalogs:ids})});load()}catch(e){alert(e.message)}}
+async function selectAllCatalogs(id,on){try{const a=(await api('/api/addons')).addons.find(x=>x.id===id);const ids=on?(a.manifest.catalogs||[]).map(c=>c.id):[];await api('/api/addons/'+id,{method:'PUT',body:JSON.stringify({selectedCatalogs:ids})});load()}catch(e){alert(e.message)}}
 async function refresh(id){try{await api('/api/addons/'+id+'/refresh',{method:'POST'});load()}catch(e){alert('Actualisation impossible : '+e.message)}}
 async function edit(id){try{const a=(await api('/api/addons')).addons.find(x=>x.id===id);const u=prompt('Nouvelle URL du manifest',a.manifestUrl);if(u&&u!==a.manifestUrl)await api('/api/addons/'+id,{method:'PUT',body:JSON.stringify({url:u})});load()}catch(e){alert('Modification impossible : '+e.message)}}
 async function del(id){if(confirm('Supprimer cet addon ?'))try{await api('/api/addons/'+id,{method:'DELETE'});load()}catch(e){alert('Suppression impossible : '+e.message)}}
@@ -143,16 +159,71 @@ http.createServer(async (req,res)=>{
     if(p[0]==='api'&&p[1]==='addons'){
       if(!allowed(req,u))return json(res,401,{error:'Admin key required'});
       if(req.method==='GET'&&p.length===2)return json(res,200,{addons:config.addons.map(a=>({...a,manifest:a.manifest||{id:null,name:a.name,version:null,description:'',types:[],resources:[],catalogs:[],streamSupported:false},error:null}))});
-      if(req.method==='POST'&&p.length===2){const b=await body(req),url=normalizeManifestUrl(b.url),a={id:randomUUID().replaceAll('-','').slice(0,12),name:String(b.name||'').trim()||url,manifestUrl:url,selectedCatalogs:[],streamEnabled:false},m=validManifest(await fetchJson(url));a.manifest=manifestInfo(m,a);a.manifest.streamSupported=supportsStream(m);cache.set(a.id,{time:Date.now(),data:m});config.addons.push(a);await saveConfig();return json(res,201,{...a,error:null})}
+      if(req.method==='POST'&&p.length===2){const b=await body(req),url=normalizeManifestUrl(b.url),a={id:randomUUID().replaceAll('-','').slice(0,12),name:String(b.name||'').trim()||url,manifestUrl:url,selectedCatalogs:[],streamEnabled:false},m=validManifest(b.manifest&&typeof b.manifest==='object'?b.manifest:await fetchJson(url));a.manifest=manifestInfo(m,a);a.manifest.streamSupported=supportsStream(m);cache.set(a.id,{time:Date.now(),data:m});config.addons.push(a);await saveConfig();return json(res,201,{...a,error:null})}
       if(p.length>=3){const id=p[2],a=findAddon(id);if(!a)return json(res,404,{error:'Addon introuvable'});if(req.method==='DELETE'&&p.length===3){config.addons=config.addons.filter(x=>x.id!==id);cache.delete(id);await saveConfig();return json(res,200,{ok:true})}if(req.method==='POST'&&p[3]==='refresh'){const m=validManifest(await fetchJson(a.manifestUrl));a.manifest=manifestInfo(m,a);a.manifest.streamSupported=supportsStream(m);cache.set(id,{time:Date.now(),data:m});a.selectedCatalogs=(a.selectedCatalogs||[]).filter(x=>m.catalogs.some(c=>c.id===x));if(!a.manifest.streamSupported)a.streamEnabled=false;await saveConfig();return json(res,200,{...a,error:null})}if(req.method==='PUT'&&p.length===3){const b=await body(req);if(b.name!==undefined)a.name=String(b.name||a.name);if(b.url!==undefined){a.manifestUrl=normalizeManifestUrl(b.url);a.manifest=undefined;cache.delete(id);const m=validManifest(await fetchJson(a.manifestUrl));a.manifest=manifestInfo(m,a);a.manifest.streamSupported=supportsStream(m);if(!a.manifest.streamSupported)a.streamEnabled=false;cache.set(id,{time:Date.now(),data:m})}if(Array.isArray(b.selectedCatalogs))a.selectedCatalogs=[...new Set(b.selectedCatalogs.map(String))];if(b.streamEnabled!==undefined)a.streamEnabled=Boolean(b.streamEnabled)&&Boolean(a.manifest?.streamSupported);await saveConfig();return json(res,200,{...a,error:null})}}
       return json(res,404,{error:'Route API inconnue'});
     }
     if(req.method!=='GET')return json(res,405,{error:'Méthode non autorisée'});
-    if(p[0]==='catalog'&&p.length===3&&p[2].endsWith('.json')){const m=/^centralyser__([^_]+)__(.+)$/.exec(decodeURIComponent(p[2].slice(0,-5)));if(!m)return json(res,404,{error:'Catalogue inconnu'});const a=findAddon(m[1]);if(!a)return json(res,404,{error:'Addon inconnu'});return json(res,200,better(await fetchJson(endpoint(a,'catalog',p[1],m[2],u.searchParams),15000)))}
+    if(p[0]==='catalog'&&p.length>=3){
+      const type=decodeURIComponent(p[1]||'');
+      const catalogToken=decodeURIComponent(p[2]||'');
+      const dot=catalogToken.lastIndexOf('.json');
+      // Stremio search routes use /catalog/type/catalogId/search=query.json:
+      // the catalog id itself has no .json suffix in that form.
+      const rawId=dot>=0?catalogToken.slice(0,dot):catalogToken;
+      const sep=rawId.indexOf('__');
+      const sep2=sep<0?-1:rawId.indexOf('__',sep+2);
+      if(!rawId.startsWith('centralyser__')||sep2<0)return json(res,404,{error:'Catalogue inconnu'});
+      const addonId=rawId.slice('centralyser__'.length,sep2);
+      const catalogId=rawId.slice(sep2+2);
+      const a=findAddon(addonId);
+      if(!a)return json(res,404,{error:'Addon inconnu'});
+      const extra=new URLSearchParams(u.searchParams);
+      for(const segment of p.slice(3)){
+        const s=decodeURIComponent(segment);
+        if(!s.endsWith('.json'))continue;
+        for(const [k,v] of new URLSearchParams(s.slice(0,-5)))extra.set(k,v);
+      }
+      const searchText=extra.get('search')?.trim()||'';
+      const requested=await fetchJson(endpoint(a,'catalog',type,catalogId,extra),15000);
+      // A search is a single global result set in Nuvio. FSE exposes the
+      // same search result through every selected genre catalog, so only
+      // expose the expanded search on the first selected catalog. Normal
+      // (non-search) catalog behaviour is untouched.
+      if(searchText && Array.isArray(a.selectedCatalogs) && a.selectedCatalogs.length && catalogId!==a.selectedCatalogs[0]){
+        return json(res,200,better({...requested,metas:[]}));
+      }
+      if(searchText&&Array.isArray(requested?.metas)){
+        const q=searchText.toLocaleLowerCase().split(/\\s+/).filter(Boolean);
+        const matches=items=>Array.isArray(items?.metas)?items.metas.filter(m=>{
+          const hay=String(m?.name||'').toLocaleLowerCase();
+          return q.every(word=>hay.includes(word));
+        }):[];
+        const merged=[]; const seen=new Set();
+        const add=items=>{for(const m of items||[]){const k=String(m?.id||m?.name||'');if(!k||seen.has(k))continue;seen.add(k);merged.push(m)}};
+        add(matches(requested));
+
+        // FSE's generic search currently returns only the newest matching
+        // entry. When that happens, use Cinemeta only as a search index to
+        // enumerate the full title family (e.g. all Avatar films).
+        // This block is search-only and never runs for the normal home feed.
+        if(merged.length<=1){
+          try{
+            const cinemetaUrl='https://v3-cinemeta.strem.io/catalog/'+encodeURIComponent(type)+'/top/search='+encodeURIComponent(searchText)+'.json';
+            const cinemeta=await fetchJson(cinemetaUrl,12000);
+            add(matches(cinemeta));
+          }catch(e){
+            console.error(`[catalog-search] Cinemeta: ${e.message}`);
+          }
+        }
+        return json(res,200,better({...requested,metas:merged}));
+      }
+      return json(res,200,better(requested));
+    }
     if(p[0]==='meta'&&p.length===3&&p[2].endsWith('.json')){const type=p[1],id=decodeURIComponent(p[2].slice(0,-5));for(const a of config.addons){try{const m=cache.has(a.id)?cache.get(a.id).data:(a.manifest||await getManifest(a)),prefixes=m.idPrefixes||[];if(prefixes.length&&!prefixes.some(x=>id.startsWith(x)))continue;const d=await fetchJson(endpoint(a,'meta',type,id,u.searchParams),15000);if(d?.meta||(Array.isArray(d?.metas)&&d.metas.length))return json(res,200,better(d))}catch(e){console.error(`[meta] ${a.name}: ${e.message}`)}}return json(res,200,{meta:null})}
     if(p[0]==='stream'&&p.length===3&&p[2].endsWith('.json')){const type=p[1],id=decodeURIComponent(p[2].slice(0,-5)),streams=[];for(const a of config.addons){if(!a.streamEnabled)continue;try{const m=cache.has(a.id)?cache.get(a.id).data:(a.manifest||await getManifest(a));if(!supportsStream(m))continue;const d=await fetchJson(endpoint(a,'stream',type,id,u.searchParams),STREAM_TIMEOUT);if(Array.isArray(d?.streams))streams.push(...d.streams)}catch(e){console.error(`[stream] ${a.name}: ${e.message}`)}}const seen=new Set(),unique=streams.filter(s=>{const k=String(s?.url||s?.externalUrl||s?.infoHash||s?.name||'');if(!k||seen.has(k))return false;seen.add(k);return true});return json(res,200,{streams:unique})}
     return json(res,404,{error:'Not found'});
   } catch(e){console.error(e);return json(res,502,{error:e.message})}
 }).listen(PORT,'0.0.0.0',()=>console.log(`Centralyser listening on ${PORT}`));
 
-async function buildManifest(){const catalogs=[],types=new Set();let hasStream=false;for(const addon of config.addons){try{const m=cache.has(addon.id)?cache.get(addon.id).data:(addon.manifest||await getManifest(addon));(m.types||[]).forEach(t=>types.add(t));for(const c of m.catalogs||[])if((addon.selectedCatalogs||[]).includes(c.id))catalogs.push({...c,id:`centralyser__${addon.id}__${c.id}`});if(addon.streamEnabled&&supportsStream(m))hasStream=true}catch(e){console.error(`[manifest] ${addon.name}: ${e.message}`)}}return{id:'com.dlambda.centralyser',version:'1.0.0',name:'Centralyser',description:'Hub personnel configurable de catalogues et flux Stremio.',resources:hasStream?['catalog','meta','stream']:['catalog','meta'],types:[...types],catalogs}}
+async function buildManifest(){const catalogs=[],types=new Set();let hasStream=false;for(const addon of config.addons){try{const m=cache.has(addon.id)?cache.get(addon.id).data:(addon.manifest||await getManifest(addon));(m.types||[]).forEach(t=>types.add(t));for(const c of m.catalogs||[])if((addon.selectedCatalogs||[]).includes(c.id)){const extra=Array.isArray(c.extra)?[...c.extra]:[];if(!extra.some(e=>e&&e.name==='search'))extra.push({name:'search',isRequired:false});catalogs.push({...c,extra,id:`centralyser__${addon.id}__${c.id}`});}if(addon.streamEnabled&&supportsStream(m))hasStream=true}catch(e){console.error(`[manifest] ${addon.name}: ${e.message}`)}}return{id:'com.dlambda.centralyser',version:'1.0.0',name:'Centralyser',description:'Hub personnel configurable de catalogues et flux Stremio.',resources:hasStream?['catalog','meta','stream']:['catalog','meta'],types:[...types],catalogs}}
