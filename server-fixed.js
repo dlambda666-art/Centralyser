@@ -197,40 +197,16 @@ http.createServer(async (req,res)=>{
         add(matches(requested));
 
         // FSE's generic search currently returns only the newest matching
-        // entry. Ask the same search endpoint for sequel-number variants.
-        // This is search-only and never runs for the normal home feed.
+        // entry. When that happens, use Cinemeta only as a search index to
+        // enumerate the full title family (e.g. all Avatar films).
+        // This block is search-only and never runs for the normal home feed.
         if(merged.length<=1){
-          const variants=[];
-          for(const n of [2,3,4,5,6])variants.push(`${searchText} ${n}`);
-          for(const n of ['II','III','IV','V','VI'])variants.push(`${searchText} ${n}`);
-          for(const variant of variants){
-            try{
-              const ve=new URLSearchParams([['search',variant]]);
-              const d=await fetchJson(endpoint(a,'catalog',type,catalogId,ve),12000);
-              add(matches(d));
-            }catch(e){console.error(`[catalog-search] ${a.name}/${catalogId} variant: ${e.message}`)}
-            if(merged.length>=10)break;
-          }
-        }
-
-        // Also try the same search variants against the other selected
-        // catalogs, without changing their normal catalog behavior.
-        if(merged.length<=1){
-          const selected=(a.selectedCatalogs||[]).filter(id=>id!==catalogId);
-          const manifestCatalogs=(a.manifest?.catalogs||[]);
-          for(const otherId of selected){
-            try{
-              const other=manifestCatalogs.find(x=>x.id===otherId);
-              if(!other||other.type!==type)continue;
-              const variants=[searchText,...[2,3,4,5,6].map(n=>`${searchText} ${n}`)];
-              for(const variant of variants){
-                const ve=new URLSearchParams([['search',variant]]);
-                const d=await fetchJson(endpoint(a,'catalog',type,otherId,ve),12000);
-                add(matches(d));
-                if(merged.length>=10)break;
-              }
-            }catch(e){console.error(`[catalog-search] ${a.name}/${otherId}: ${e.message}`)}
-            if(merged.length>=10)break;
+          try{
+            const cinemetaUrl='https://v3-cinemeta.strem.io/catalog/'+encodeURIComponent(type)+'/top/search='+encodeURIComponent(searchText)+'.json';
+            const cinemeta=await fetchJson(cinemetaUrl,12000);
+            add(matches(cinemeta));
+          }catch(e){
+            console.error(`[catalog-search] Cinemeta: ${e.message}`);
           }
         }
         return json(res,200,better({...requested,metas:merged}));
