@@ -186,39 +186,35 @@ http.createServer(async (req,res)=>{
       }
       const searchText=extra.get('search')?.trim()||'';
       const requested=await fetchJson(endpoint(a,'catalog',type,catalogId,extra),15000);
-      if(searchText){
-        // Some upstream addons (notably FSE/Frank) expose a search route but
-        // return only a partial result or their normal home feed. Supplement
-        // that result with a local search through the catalog's normal feed.
+      if(searchText&&Array.isArray(requested?.metas)){
         const q=searchText.toLocaleLowerCase().split(/\\s+/).filter(Boolean);
-        const matches=(items)=>Array.isArray(items?.metas)?items.metas.filter(m=>{
+        const direct=requested.metas.filter(m=>{
           const hay=String(m?.name||'').toLocaleLowerCase();
           return q.every(word=>hay.includes(word));
-        }):[];
-        const merged=[];
-        const seen=new Set();
-        const add=(items)=>{for(const m of items||[]){const k=String(m?.id||m?.name||'');if(!k||seen.has(k))continue;seen.add(k);merged.push(m)}};
-        // Keep only genuine search matches from the upstream response. Some
-        // addons return their home feed here even though search was requested.
-        add(matches(requested));
-        // Search several normal-feed pages so older saga entries are not lost
-        // just because the upstream search endpoint returns only recent items.
-        for(let page=0;page<5;page++){
-          const pageExtra=new URLSearchParams();
-          if(page) pageExtra.set('skip',String(page*100));
-          try{
-            const base=await fetchJson(endpoint(a,'catalog',type,catalogId,pageExtra),15000);
-            const pageMetas=Array.isArray(base?.metas)?base.metas:[];
-            add(matches({metas:pageMetas}));
-            if(!pageMetas.length||pageMetas.length<100)break;
-          }catch(e){
-            console.error(`[catalog-search] ${a.name}/${catalogId} page ${page}: ${e.message}`);
-            break;
+        });
+        // Frank/FSE may return only the newest matching title. Only in that
+        // case, scan a few older pages of this same catalog for saga entries.
+        if(direct.length<=1){
+          const merged=[]; const seen=new Set();
+          const add=items=>{for(const m of items||[]){const k=String(m?.id||m?.name||'');if(!k||seen.has(k))continue;seen.add(k);merged.push(m)}};
+          add(direct);
+          for(const skip of [100,200,300]){
+            try{
+              const page=await fetchJson(endpoint(a,'catalog',type,catalogId,new URLSearchParams([['skip',String(skip)]])),12000);
+              const hits=Array.isArray(page?.metas)?page.metas.filter(m=>{
+                const hay=String(m?.name||'').toLocaleLowerCase();
+                return q.every(word=>hay.includes(word));
+              }):[];
+              add(hits);
+              if(merged.length>=10)break;
+            }catch(e){
+              console.error(`[catalog-search] ${a.name}/${catalogId} skip=${skip}: ${e.message}`);
+              break;
+            }
           }
+          return json(res,200,better({...requested,metas:merged}));
         }
-        // Never fall back to the upstream home feed for a search request.
-        // If nothing matched, return an empty search result instead.
-        return json(res,200,better({...requested,metas:merged}));
+        return json(res,200,better({...requested,metas:direct}));
       }
       return json(res,200,better(requested));
     }
