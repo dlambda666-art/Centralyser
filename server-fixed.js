@@ -194,52 +194,44 @@ http.createServer(async (req,res)=>{
         }):[];
         const merged=[]; const seen=new Set();
         const add=items=>{for(const m of items||[]){const k=String(m?.id||m?.name||'');if(!k||seen.has(k))continue;seen.add(k);merged.push(m)}};
-        // FSE currently appears to ignore the search argument and return the
-        // first/home item(s) of every category. Detect that before accepting
-        // the upstream result, otherwise the same newest Avatar is repeated
-        // in every category.
-        let requestedIsRealSearch=true;
-        try{
-          const home=await fetchJson(endpoint(a,'catalog',type,catalogId,new URLSearchParams()),12000);
-          const rids=requested.metas.map(m=>String(m?.id||'')).filter(Boolean);
-          const hids=Array.isArray(home?.metas)?home.metas.map(m=>String(m?.id||'')).filter(Boolean):[];
-          const overlap=rids.filter(id=>hids.includes(id)).length;
-          if(rids.length&&overlap===rids.length)requestedIsRealSearch=false;
-        }catch(e){console.error(`[catalog-search] home check ${a.name}/${catalogId}: ${e.message}`)}
-        if(requestedIsRealSearch)add(matches(requested));
-        // Search every selected catalog only when the request is genuine; if
-        // FSE ignores search, scan its normal catalog pages instead.
-        const catalogIds=[catalogId,...(a.selectedCatalogs||[]).filter(id=>id!==catalogId)];
-        const manifestCatalogs=(a.manifest?.catalogs||[]);
-        for(const otherId of catalogIds){
-          try{
-            const other=manifestCatalogs.find(x=>x.id===otherId);
-            if(!other||other.type!==type)continue;
-            const sameRequested=otherId===catalogId;
-            const d=sameRequested?requested:await fetchJson(endpoint(a,'catalog',type,otherId,extra),12000);
-            let real=true;
-            if(!sameRequested){
-              const home=await fetchJson(endpoint(a,'catalog',type,otherId,new URLSearchParams()),12000);
-              const dids=Array.isArray(d?.metas)?d.metas.map(m=>String(m?.id||'')).filter(Boolean):[];
-              const hids=Array.isArray(home?.metas)?home.metas.map(m=>String(m?.id||'')).filter(Boolean):[];
-              if(dids.length&&dids.every(id=>hids.includes(id)))real=false;
-            }
-            if(real)add(matches(d));
-            // If the addon ignores search, walk older pages of this catalog.
-            if(!real||merged.length<=1){
-              for(const skip of [0,100,200,300,400]){
-                try{
-                  const page=await fetchJson(endpoint(a,'catalog',type,otherId,new URLSearchParams([['skip',String(skip)]])),12000);
-                  add(matches(page));
-                  if(merged.length>=10)break;
-                  if(!Array.isArray(page?.metas)||page.metas.length<50)break;
-                }catch(e){
-                  console.error(`[catalog-search] ${a.name}/${otherId} skip=${skip}: ${e.message}`);
-                  break;
-                }
+        add(matches(requested));
+
+        // FSE's generic search currently returns only the newest matching
+        // entry. Ask the same search endpoint for sequel-number variants.
+        // This is search-only and never runs for the normal home feed.
+        if(merged.length<=1){
+          const variants=[];
+          for(const n of [2,3,4,5,6])variants.push(`${searchText} ${n}`);
+          for(const n of ['II','III','IV','V','VI'])variants.push(`${searchText} ${n}`);
+          for(const variant of variants){
+            try{
+              const ve=new URLSearchParams([['search',variant]]);
+              const d=await fetchJson(endpoint(a,'catalog',type,catalogId,ve),12000);
+              add(matches(d));
+            }catch(e){console.error(`[catalog-search] ${a.name}/${catalogId} variant: ${e.message}`)}
+            if(merged.length>=10)break;
+          }
+        }
+
+        // Also try the same search variants against the other selected
+        // catalogs, without changing their normal catalog behavior.
+        if(merged.length<=1){
+          const selected=(a.selectedCatalogs||[]).filter(id=>id!==catalogId);
+          const manifestCatalogs=(a.manifest?.catalogs||[]);
+          for(const otherId of selected){
+            try{
+              const other=manifestCatalogs.find(x=>x.id===otherId);
+              if(!other||other.type!==type)continue;
+              const variants=[searchText,...[2,3,4,5,6].map(n=>`${searchText} ${n}`)];
+              for(const variant of variants){
+                const ve=new URLSearchParams([['search',variant]]);
+                const d=await fetchJson(endpoint(a,'catalog',type,otherId,ve),12000);
+                add(matches(d));
+                if(merged.length>=10)break;
               }
-            }
-          }catch(e){console.error(`[catalog-search] ${a.name}/${otherId}: ${e.message}`)}
+            }catch(e){console.error(`[catalog-search] ${a.name}/${otherId}: ${e.message}`)}
+            if(merged.length>=10)break;
+          }
         }
         return json(res,200,better({...requested,metas:merged}));
       }
