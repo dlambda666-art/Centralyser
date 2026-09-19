@@ -1,0 +1,24 @@
+name: Deploy JustWatch Dates to Hugging Face
+
+on:
+  push:
+    branches: [lab/justwatch-dates]
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout lab branch
+        uses: actions/checkout@v4
+        with:
+          ref: lab/justwatch-dates
+      - name: Sync to Hugging Face Space
+        uses: huggingface/hub-sync@v0.1.0
+        with:
+          github_repo_id: dlambda666-art/Centralyser
+          huggingface_repo_id: Lambda666/JustWatch-Dates
+          hf_token: ${{ secrets.HF_TOKEN }}
+          repo_type: space
+          space_sdk: docker
+          private: false
