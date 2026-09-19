@@ -432,10 +432,10 @@ export async function meta(id) {
   const raw = String(id || "");
   let tmdbId = null;
 
-  const tmdbMatch = /^(?:jwd:tmdb:|tmdb:)(\\d+)$/.exec(raw);
+  const tmdbMatch = /^(?:jwd:tmdb:|tmdb:)(\d+)$/.exec(raw);
   if (tmdbMatch) {
     tmdbId = tmdbMatch[1];
-  } else if (/^tt\\d+$/.test(raw)) {
+  } else if (/^tt\d+$/.test(raw)) {
     const found = await tmdb(`/find/${raw}`, {
       external_source: "imdb_id",
       language: LANGUAGE
