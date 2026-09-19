@@ -1,13 +1,8 @@
 {
-  "name": "centralyser",
-  "version": "1.0.1",
+  "name": "justwatch-dates-nuvio",
+  "version": "0.1.0",
   "private": false,
   "type": "module",
-  "scripts": {
-    "start": "node --import ./preload.mjs boot.js"
-  },
-  "engines": {
-    "node": ">=20"
-  },
-  "description": "Hub personnel configurable de catalogues Stremio"
+  "scripts": { "start": "node justwatch-server.js" },
+  "engines": { "node": ">=20" }
 }
