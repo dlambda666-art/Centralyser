@@ -146,7 +146,7 @@ async function enrichMovie(movie) {
     : justwatchSearchUrl(title, year);
 
   return {
-    id: `tmdb:${movie.id}`,
+    id: `jwd:tmdb:${movie.id}`,
     type: "movie",
     name: title,
     poster: poster(movie.poster_path),
@@ -178,12 +178,12 @@ async function enrichMovie(movie) {
 
 export const manifest = {
   id: "com.dlambda.justwatch-dates",
-  version: "0.1.1",
+  version: "0.1.2",
   name: "JustWatch — Dates numériques",
   description: "Recherche de films et consultation des dates de sortie numérique en Belgique, avec lien direct vers JustWatch.",
   resources: ["catalog", "meta"],
   types: ["movie"],
-  idPrefixes: ["tmdb:"],
+  idPrefixes: ["jwd:tmdb:"],
   catalogs: [
     {
       type: "movie",
@@ -241,7 +241,7 @@ export async function catalog(catalogId, extra = {}) {
 
 export async function meta(id) {
   const raw = String(id || "");
-  const match = /^tmdb:(\d+)$/.exec(raw);
+  const match = /^jwd:tmdb:(\d+)$/.exec(raw);
   if (!match) return { meta: null };
   const movie = await tmdb(`/movie/${match[1]}`, {
     language: LANGUAGE,
