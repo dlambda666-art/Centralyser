@@ -141,7 +141,7 @@ async function justwatchPublicGraphql(title, tmdbId) {
                 tmdbId
               }
               fullPath
-              upcomingReleases(releaseTypes: DIGITAL) {
+              upcomingReleases {
                 releaseDate
                 package {
                   shortName
