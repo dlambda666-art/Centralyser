@@ -184,7 +184,25 @@ http.createServer(async (req,res)=>{
         if(!s.endsWith('.json'))continue;
         for(const [k,v] of new URLSearchParams(s.slice(0,-5)))extra.set(k,v);
       }
-      return json(res,200,better(await fetchJson(endpoint(a,'catalog',type,catalogId,extra),15000)));
+      const searchText=extra.get('search')?.trim()||'';
+      const requested=await fetchJson(endpoint(a,'catalog',type,catalogId,extra),15000);
+      if(searchText&&Array.isArray(requested?.metas)&&requested.metas.length){
+        // Some upstream addons advertise search but return their home feed for
+        // the search route. Detect that case and filter the feed locally.
+        const base=await fetchJson(endpoint(a,'catalog',type,catalogId,new URLSearchParams()),15000);
+        const ids1=requested.metas.map(x=>String(x?.id||'')).filter(Boolean);
+        const ids2=Array.isArray(base?.metas)?base.metas.map(x=>String(x?.id||'')).filter(Boolean):[];
+        const sameFeed=ids1.length&&ids1.length===ids2.length&&ids1.every((id,i)=>id===ids2[i]);
+        if(sameFeed){
+          const q=searchText.toLocaleLowerCase().split(/\\s+/).filter(Boolean);
+          const metas=(base.metas||[]).filter(m=>{
+            const hay=String(m?.name||'').toLocaleLowerCase();
+            return q.every(word=>hay.includes(word));
+          });
+          return json(res,200,better({...base,metas}));
+        }
+      }
+      return json(res,200,better(requested));
     }
     if(p[0]==='meta'&&p.length===3&&p[2].endsWith('.json')){const type=p[1],id=decodeURIComponent(p[2].slice(0,-5));for(const a of config.addons){try{const m=cache.has(a.id)?cache.get(a.id).data:(a.manifest||await getManifest(a)),prefixes=m.idPrefixes||[];if(prefixes.length&&!prefixes.some(x=>id.startsWith(x)))continue;const d=await fetchJson(endpoint(a,'meta',type,id,u.searchParams),15000);if(d?.meta||(Array.isArray(d?.metas)&&d.metas.length))return json(res,200,better(d))}catch(e){console.error(`[meta] ${a.name}: ${e.message}`)}}return json(res,200,{meta:null})}
     if(p[0]==='stream'&&p.length===3&&p[2].endsWith('.json')){const type=p[1],id=decodeURIComponent(p[2].slice(0,-5)),streams=[];for(const a of config.addons){if(!a.streamEnabled)continue;try{const m=cache.has(a.id)?cache.get(a.id).data:(a.manifest||await getManifest(a));if(!supportsStream(m))continue;const d=await fetchJson(endpoint(a,'stream',type,id,u.searchParams),STREAM_TIMEOUT);if(Array.isArray(d?.streams))streams.push(...d.streams)}catch(e){console.error(`[stream] ${a.name}: ${e.message}`)}}const seen=new Set(),unique=streams.filter(s=>{const k=String(s?.url||s?.externalUrl||s?.infoHash||s?.name||'');if(!k||seen.has(k))return false;seen.add(k);return true});return json(res,200,{streams:unique})}
