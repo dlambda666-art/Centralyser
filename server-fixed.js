@@ -198,7 +198,9 @@ http.createServer(async (req,res)=>{
         const merged=[];
         const seen=new Set();
         const add=(items)=>{for(const m of items||[]){const k=String(m?.id||m?.name||'');if(!k||seen.has(k))continue;seen.add(k);merged.push(m)}};
-        add(requested?.metas);
+        // Keep only genuine search matches from the upstream response. Some
+        // addons return their home feed here even though search was requested.
+        add(matches(requested));
         // Search several normal-feed pages so older saga entries are not lost
         // just because the upstream search endpoint returns only recent items.
         for(let page=0;page<5;page++){
