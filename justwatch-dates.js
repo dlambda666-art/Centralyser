@@ -151,8 +151,17 @@ async function enrichMovie(movie) {
     name: title,
     poster: poster(movie.poster_path),
     description: movie.overview || "",
-    releaseInfo: year,
+    releaseInfo: digitalReleaseDate
+      ? `${year} • Numérique : ${digitalReleaseDate}`
+      : year,
     released: movie.release_date ? `${movie.release_date}T00:00:00.000Z` : undefined,
+    description: [
+      digitalReleaseDate
+        ? `Sortie numérique Belgique : ${digitalReleaseDate}`
+        : "Sortie numérique Belgique : date inconnue",
+      movie.overview || ""
+    ].filter(Boolean).join("\n\n"),
+    website: jwUrl,
     links: [
       {
         name: digitalReleaseDate
@@ -169,7 +178,7 @@ async function enrichMovie(movie) {
 
 export const manifest = {
   id: "com.dlambda.justwatch-dates",
-  version: "0.1.0",
+  version: "0.1.1",
   name: "JustWatch — Dates numériques",
   description: "Recherche de films et consultation des dates de sortie numérique en Belgique, avec lien direct vers JustWatch.",
   resources: ["catalog", "meta"],
