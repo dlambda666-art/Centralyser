@@ -430,9 +430,22 @@ export async function catalog(catalogId, extra = {}) {
 
 export async function meta(id) {
   const raw = String(id || "");
-  const match = /^(?:jwd:tmdb:|tmdb:)(\d+)$/.exec(raw);
-  if (!match) return { meta: null };
-  const movie = await tmdb(`/movie/${match[1]}`, {
+  let tmdbId = null;
+
+  const tmdbMatch = /^(?:jwd:tmdb:|tmdb:)(\\d+)$/.exec(raw);
+  if (tmdbMatch) {
+    tmdbId = tmdbMatch[1];
+  } else if (/^tt\\d+$/.test(raw)) {
+    const found = await tmdb(`/find/${raw}`, {
+      external_source: "imdb_id",
+      language: LANGUAGE
+    });
+    tmdbId = found?.movie_results?.[0]?.id ? String(found.movie_results[0].id) : null;
+  }
+
+  if (!tmdbId) return { meta: null };
+
+  const movie = await tmdb(`/movie/${tmdbId}`, {
     language: LANGUAGE,
     append_to_response: "external_ids"
   });
