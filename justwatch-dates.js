@@ -346,8 +346,8 @@ async function enrichMovie(movie) {
     released: movie.release_date ? `${movie.release_date}T00:00:00.000Z` : undefined,
     description: [
       digitalReleaseDate
-        ? `Sortie numérique Belgique : ${digitalReleaseDate}`
-        : "Sortie numérique Belgique : date inconnue",
+        ? `Sortie numérique : ${digitalReleaseDate}`
+        : "Sortie numérique : date inconnue",
       movie.overview || ""
     ].filter(Boolean).join("\n\n"),
     website: jwUrl,
@@ -367,12 +367,12 @@ async function enrichMovie(movie) {
 
 export const manifest = {
   id: "com.dlambda.justwatch-dates",
-  version: "0.1.4",
+  version: "0.2.0",
   name: "JustWatch — Dates numériques",
-  description: "Recherche de films et consultation des dates de sortie numérique en Belgique, avec lien direct vers JustWatch.",
+  description: "Ajoute les informations JustWatch à la fiche des films, avec la date de sortie numérique et les offres disponibles.",
   resources: ["catalog", "meta"],
   types: ["movie"],
-  idPrefixes: ["jwd:tmdb:"],
+  idPrefixes: ["jwd:tmdb:", "tmdb:", "tt"],
   catalogs: [
     {
       type: "movie",
@@ -430,9 +430,22 @@ export async function catalog(catalogId, extra = {}) {
 
 export async function meta(id) {
   const raw = String(id || "");
-  const match = /^jwd:tmdb:(\d+)$/.exec(raw);
-  if (!match) return { meta: null };
-  const movie = await tmdb(`/movie/${match[1]}`, {
+  let tmdbId = null;
+
+  const tmdbMatch = /^jwd:tmdb:(\d+)$/.exec(raw) || /^tmdb:(\d+)$/.exec(raw);
+  if (tmdbMatch) {
+    tmdbId = tmdbMatch[1];
+  } else if (/^tt\d+$/.test(raw)) {
+    const found = await tmdb(`/find/${raw}`, {
+      external_source: "imdb_id",
+      language: LANGUAGE
+    });
+    tmdbId = found?.movie_results?.[0]?.id ? String(found.movie_results[0].id) : null;
+  }
+
+  if (!tmdbId) return { meta: null };
+
+  const movie = await tmdb(`/movie/${tmdbId}`, {
     language: LANGUAGE,
     append_to_response: "external_ids"
   });
