@@ -449,5 +449,32 @@ export async function meta(id) {
     language: LANGUAGE,
     append_to_response: "external_ids"
   });
-  return { meta: await enrichMovie(movie, raw) };
+
+  // The detail request must stay responsive. Optional JustWatch enrichment
+  // is allowed to time out; the basic TMDB fiche must still be returned.
+  const basicMeta = {
+    id: raw,
+    type: "movie",
+    name: movie.title || movie.original_title || "Titre inconnu",
+    poster: poster(movie.poster_path),
+    description: movie.overview || "",
+    releaseInfo: movie.release_date ? movie.release_date.slice(0, 4) : undefined,
+    released: movie.release_date ? `${movie.release_date}T00:00:00.000Z` : undefined,
+    website: justwatchSearchUrl(
+      movie.title || movie.original_title || "",
+      movie.release_date ? movie.release_date.slice(0, 4) : ""
+    ),
+    links: []
+  };
+
+  try {
+    const enriched = await Promise.race([
+      enrichMovie(movie, raw),
+      new Promise((resolve) => setTimeout(() => resolve(null), 8000))
+    ]);
+    return { meta: enriched || basicMeta };
+  } catch (error) {
+    console.error(`[meta] ${raw}: ${error.message}`);
+    return { meta: basicMeta };
+  }
 }
