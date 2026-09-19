@@ -35,11 +35,11 @@ async function tmdb(path, params = {}) {
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT);
+  url.searchParams.set("api_key", TMDB_API_KEY);
   try {
     const response = await fetch(url, {
       headers: {
-        accept: "application/json",
-        Authorization: `Bearer ${TMDB_API_KEY}`
+        accept: "application/json"
       },
       signal: controller.signal
     });
