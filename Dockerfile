@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY package.json ./
 COPY server-fixed.js ./
+COPY justwatch-dates.js ./
 COPY boot.js ./
 COPY preload.mjs ./
 
