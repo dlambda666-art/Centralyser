@@ -162,8 +162,7 @@ async function justwatchPublicGraphql(title, tmdbId) {
       first: 10,
       filter: {
         searchQuery: title,
-        objectTypes: ["MOVIE"],
-        includeTitlesWithoutUrl: true
+        objectTypes: ["MOVIE"]
       }
     },
     query
