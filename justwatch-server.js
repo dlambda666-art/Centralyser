@@ -32,9 +32,21 @@ http.createServer(async (req, res) => {
         justWatchPartnerConfigured: Boolean(process.env.JUSTWATCH_PARTNER_TOKEN)
       });
     }
-    if (parts[0] === "catalog" && parts[1] === "movie" && parts.length === 3 && parts[2].endsWith(".json")) {
-      const catalogId = decodeURIComponent(parts[2].slice(0, -5));
-      return json(res, 200, await catalog(catalogId, Object.fromEntries(url.searchParams.entries())));
+    if (parts[0] === "catalog" && parts[1] === "movie" && parts.length >= 3 && parts[parts.length - 1].endsWith(".json")) {
+      const catalogId = decodeURIComponent(parts[2].replace(/\.json$/, ""));
+      const extra = Object.fromEntries(url.searchParams.entries());
+      const extraParts = parts.slice(3);
+      if (extraParts.length) {
+        const last = extraParts.length - 1;
+        extraParts.forEach((raw, index) => {
+          const segment = index === last ? raw.slice(0, -5) : raw;
+          for (const pair of segment.split("&")) {
+            const eq = pair.indexOf("=");
+            if (eq > 0) extra[decodeURIComponent(pair.slice(0, eq))] = decodeURIComponent(pair.slice(eq + 1));
+          }
+        });
+      }
+      return json(res, 200, await catalog(catalogId, extra));
     }
     if (parts[0] === "meta" && parts[1] === "movie" && parts.length === 3 && parts[2].endsWith(".json")) {
       const id = decodeURIComponent(parts[2].slice(0, -5));
