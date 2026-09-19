@@ -37,16 +37,43 @@ function normalizeManifestUrl(value) {
   return url.toString();
 }
 async function fetchJson(url, timeout = MANIFEST_TIMEOUT) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  try {
-    const r = await fetch(url, { headers: { accept: "application/json" }, redirect: "follow", signal: controller.signal });
-    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-    return await r.json();
-  } catch (e) {
-    if (e.name === "AbortError") throw new Error(`Délai dépassé après ${timeout / 1000}s en lisant le manifest`);
-    throw e;
-  } finally { clearTimeout(timer); }
+  const maxAttempts = 3;
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      const r = await fetch(url, {
+        headers: {
+          accept: "application/json",
+          "user-agent": "Centralyser/1.0"
+        },
+        redirect: "follow",
+        signal: controller.signal
+      });
+      if (r.ok) return await r.json();
+      const retryAfter = Number(r.headers.get("retry-after") || 0);
+      const message = `${r.status} ${r.statusText}`;
+      if ((r.status === 429 || r.status === 503) && attempt < maxAttempts) {
+        const waitMs = Math.min(Math.max(retryAfter * 1000, 500 * attempt), 2500);
+        console.warn(`[fetch] ${message} for ${url}; retry ${attempt + 1}/${maxAttempts} in ${waitMs}ms`);
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+        continue;
+      }
+      throw new Error(message);
+    } catch (e) {
+      if (e.name === "AbortError") {
+        lastError = new Error(`Délai dépassé après ${timeout / 1000}s en lisant le manifest`);
+      } else {
+        lastError = e;
+      }
+      if (attempt < maxAttempts && /^(429|503)\\b/.test(lastError.message)) continue;
+      throw lastError;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError || new Error("Échec de lecture du manifest");
 }
 function validManifest(m) {
   if (!m || typeof m !== "object") throw new Error("Manifest invalide");
