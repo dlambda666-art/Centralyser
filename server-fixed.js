@@ -186,21 +186,35 @@ http.createServer(async (req,res)=>{
       }
       const searchText=extra.get('search')?.trim()||'';
       const requested=await fetchJson(endpoint(a,'catalog',type,catalogId,extra),15000);
-      if(searchText&&Array.isArray(requested?.metas)&&requested.metas.length){
-        // Some upstream addons advertise search but return their home feed for
-        // the search route. Detect that case and filter the feed locally.
-        const base=await fetchJson(endpoint(a,'catalog',type,catalogId,new URLSearchParams()),15000);
-        const ids1=requested.metas.map(x=>String(x?.id||'')).filter(Boolean);
-        const ids2=Array.isArray(base?.metas)?base.metas.map(x=>String(x?.id||'')).filter(Boolean):[];
-        const sameFeed=ids1.length&&ids1.length===ids2.length&&ids1.every((id,i)=>id===ids2[i]);
-        if(sameFeed){
-          const q=searchText.toLocaleLowerCase().split(/\\s+/).filter(Boolean);
-          const metas=(base.metas||[]).filter(m=>{
-            const hay=String(m?.name||'').toLocaleLowerCase();
-            return q.every(word=>hay.includes(word));
-          });
-          return json(res,200,better({...base,metas}));
+      if(searchText){
+        // Some upstream addons (notably FSE/Frank) expose a search route but
+        // return only a partial result or their normal home feed. Supplement
+        // that result with a local search through the catalog's normal feed.
+        const q=searchText.toLocaleLowerCase().split(/\\s+/).filter(Boolean);
+        const matches=(items)=>Array.isArray(items?.metas)?items.metas.filter(m=>{
+          const hay=String(m?.name||'').toLocaleLowerCase();
+          return q.every(word=>hay.includes(word));
+        }):[];
+        const merged=[];
+        const seen=new Set();
+        const add=(items)=>{for(const m of items||[]){const k=String(m?.id||m?.name||'');if(!k||seen.has(k))continue;seen.add(k);merged.push(m)}};
+        add(requested?.metas);
+        // Search several normal-feed pages so older saga entries are not lost
+        // just because the upstream search endpoint returns only recent items.
+        for(let page=0;page<5;page++){
+          const pageExtra=new URLSearchParams();
+          if(page) pageExtra.set('skip',String(page*100));
+          try{
+            const base=await fetchJson(endpoint(a,'catalog',type,catalogId,pageExtra),15000);
+            const pageMetas=Array.isArray(base?.metas)?base.metas:[];
+            add(matches({metas:pageMetas}));
+            if(!pageMetas.length||pageMetas.length<100)break;
+          }catch(e){
+            console.error(`[catalog-search] ${a.name}/${catalogId} page ${page}: ${e.message}`);
+            break;
+          }
         }
+        if(merged.length)return json(res,200,better({...requested,metas:merged}));
       }
       return json(res,200,better(requested));
     }
