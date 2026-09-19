@@ -216,7 +216,9 @@ http.createServer(async (req,res)=>{
             break;
           }
         }
-        if(merged.length)return json(res,200,better({...requested,metas:merged}));
+        // Never fall back to the upstream home feed for a search request.
+        // If nothing matched, return an empty search result instead.
+        return json(res,200,better({...requested,metas:merged}));
       }
       return json(res,200,better(requested));
     }
@@ -226,4 +228,4 @@ http.createServer(async (req,res)=>{
   } catch(e){console.error(e);return json(res,502,{error:e.message})}
 }).listen(PORT,'0.0.0.0',()=>console.log(`Centralyser listening on ${PORT}`));
 
-async function buildManifest(){const catalogs=[],types=new Set();let hasStream=false;for(const addon of config.addons){try{const m=cache.has(addon.id)?cache.get(addon.id).data:(addon.manifest||await getManifest(addon));(m.types||[]).forEach(t=>types.add(t));for(const c of m.catalogs||[])if((addon.selectedCatalogs||[]).includes(c.id)){const extra=Array.isArray(c.extra)?[...c.extra]:[];if(!extra.some(e=>e&&e.name==='search'))extra.push({name:'search',isRequired:false});catalogs.push({...c,extra,id:`centralyser__${addon.id}__${c.id}`});}if(addon.streamEnabled&&supportsStream(m))hasStream=true}catch(e){console.error(`[manifest] ${addon.name}: ${e.message}`)}}return{id:'com.dlambda.centralyser',version:'1.0.0',name:'Centralyser',description:'Hub personnel configurable de catalogues et flux Stremio.',resources:hasStream?['catalog','meta','stream']:['catalog','meta'],types:[...types],catalogs}}
+async function buildManifest(){const catalogs=[],types=new Set();let hasStream=false;for(const addon of config.addons){try{const m=cache.has(addon.id)?cache.get(addon.id).data:(addon.manifest||await getManifest(addon));(m.types||[]).forEach(t=>types.add(t));for(const c of m.catalogs||[])if((addon.selectedCatalogs||[]).includes(c.id)){const extra=Array.isArray(c.extra)?[...c.extra]:[];if(!extra.some(e=>e&&e.name==='search'))extra.push({name:'search',isRequired:false});catalogs.push({...c,extra,id:`centralyser__${addon.id}__${c.id}`});}if(addon.streamEnabled&&supportsStream(m))hasStream=true}catch(e){console.error(`[manifest] ${addon.name}: ${e.message}`)}}return{id:'com.dlambda.centralyser',version:'1.0.2',name:'Centralyser',description:'Hub personnel configurable de catalogues et flux Stremio.',resources:hasStream?['catalog','meta','stream']:['catalog','meta'],types:[...types],catalogs}}
