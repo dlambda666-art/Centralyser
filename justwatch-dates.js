@@ -114,6 +114,77 @@ async function justwatch(tmdbId) {
   return fetchJson(url.toString());
 }
 
+async function justwatchNewTitleDates(title) {
+  const query = `
+    query GetNewTitleDates(
+      $country: Country!,
+      $filter: TitleFilter,
+      $first: Int!,
+      $bucketSize: Int!
+    ) {
+      newTitleBuckets(
+        country: $country,
+        filter: $filter,
+        first: $first,
+        bucketSize: $bucketSize,
+        priceDrops: false,
+        pageType: NEW,
+        groupBy: DATE_PACKAGE
+      ) {
+        edges {
+          key {
+            ... on DatePackageAggregationKey {
+              date
+              package {
+                clearName
+                shortName
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+  const body = {
+    operationName: "GetNewTitleDates",
+    variables: {
+      country: "FR",
+      first: 30,
+      bucketSize: 8,
+      filter: {
+        searchQuery: title,
+        objectTypes: ["MOVIE"]
+      }
+    },
+    query
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT);
+  try {
+    const response = await fetch("https://apis.justwatch.com/graphql", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        "user-agent": "Nuvio-JustWatch-Dates/0.2"
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`JustWatch new-title GraphQL ${response.status} ${response.statusText}`);
+    const data = await response.json();
+    if (Array.isArray(data?.errors) && data.errors.length) {
+      throw new Error(data.errors.map(error => error.message).join("; "));
+    }
+    return (data?.data?.newTitleBuckets?.edges || [])
+      .map(edge => edge?.key?.date)
+      .filter(value => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(value || "")))
+      .map(value => String(value));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function justwatchPublicGraphql(title, tmdbId) {
   const query = `
     query GetTitleForReleaseDate(
@@ -222,7 +293,7 @@ async function enrichMovie(movie) {
       const releases = publicJw?.content?.upcomingReleases || [];
       const dates = releases
         .map(item => item?.releaseDate)
-        .filter(value => /^\d{4}-\d{2}-\d{2}/.test(String(value || "")))
+        .filter(value => /^\\d{4}-\\d{2}-\\d{2}/.test(String(value || "")))
         .map(value => String(value).slice(0, 10))
         .sort();
       digitalReleaseDate = dates[0] || null;
@@ -230,6 +301,22 @@ async function enrichMovie(movie) {
       if (digitalReleaseDate) dateSource = "JustWatch public";
     } catch (error) {
       console.error(`[justwatch-public] ${movie.id}: ${error.message}`);
+    }
+  }
+
+  if (!digitalReleaseDate) {
+    try {
+      const dates = await justwatchNewTitleDates(
+        movie.title || movie.original_title || ""
+      );
+      digitalReleaseDate = dates
+        .map(value => new Date(value))
+        .filter(date => !Number.isNaN(date.getTime()))
+        .sort((a, b) => Math.abs(a.getTime() - Date.now()) - Math.abs(b.getTime() - Date.now()))
+        .map(date => date.toISOString().slice(0, 10))[0] || null;
+      if (digitalReleaseDate) dateSource = "JustWatch new titles";
+    } catch (error) {
+      console.error(`[justwatch-new-titles] ${movie.id}: ${error.message}`);
     }
   }
 
@@ -280,7 +367,7 @@ async function enrichMovie(movie) {
 
 export const manifest = {
   id: "com.dlambda.justwatch-dates",
-  version: "0.1.3",
+  version: "0.1.4",
   name: "JustWatch — Dates numériques",
   description: "Recherche de films et consultation des dates de sortie numérique en Belgique, avec lien direct vers JustWatch.",
   resources: ["catalog", "meta"],
