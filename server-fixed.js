@@ -188,33 +188,42 @@ http.createServer(async (req,res)=>{
       const requested=await fetchJson(endpoint(a,'catalog',type,catalogId,extra),15000);
       if(searchText&&Array.isArray(requested?.metas)){
         const q=searchText.toLocaleLowerCase().split(/\\s+/).filter(Boolean);
-        const direct=requested.metas.filter(m=>{
+        const matches=items=>Array.isArray(items?.metas)?items.metas.filter(m=>{
           const hay=String(m?.name||'').toLocaleLowerCase();
           return q.every(word=>hay.includes(word));
-        });
-        // Frank/FSE may return only the newest matching title. Only in that
-        // case, scan a few older pages of this same catalog for saga entries.
-        if(direct.length<=1){
-          const merged=[]; const seen=new Set();
-          const add=items=>{for(const m of items||[]){const k=String(m?.id||m?.name||'');if(!k||seen.has(k))continue;seen.add(k);merged.push(m)}};
-          add(direct);
+        }):[];
+        const merged=[]; const seen=new Set();
+        const add=items=>{for(const m of items||[]){const k=String(m?.id||m?.name||'');if(!k||seen.has(k))continue;seen.add(k);merged.push(m)}};
+        add(matches(requested));
+        // FSE can limit a search to the current catalog. For a real search,
+        // also query the other selected FSE catalogs so older saga entries
+        // (often filed under Action/Adventure rather than "Derniers films")
+        // can be found without changing normal home feeds.
+        const selected=(a.selectedCatalogs||[]).filter(id=>id!==catalogId);
+        const manifestCatalogs=(a.manifest?.catalogs||[]);
+        for(const otherId of selected){
+          try{
+            const other=manifestCatalogs.find(c=>c.id===otherId);
+            if(!other||other.type!==type)continue;
+            const d=await fetchJson(endpoint(a,'catalog',type,otherId,extra),12000);
+            add(matches(d));
+          }catch(e){console.error(`[catalog-search] ${a.name}/${otherId}: ${e.message}`)}
+        }
+        // If the combined search still has only one match, inspect a few
+        // older pages of the current catalog as a final fallback.
+        if(merged.length<=1){
           for(const skip of [100,200,300]){
             try{
               const page=await fetchJson(endpoint(a,'catalog',type,catalogId,new URLSearchParams([['skip',String(skip)]])),12000);
-              const hits=Array.isArray(page?.metas)?page.metas.filter(m=>{
-                const hay=String(m?.name||'').toLocaleLowerCase();
-                return q.every(word=>hay.includes(word));
-              }):[];
-              add(hits);
+              add(matches(page));
               if(merged.length>=10)break;
             }catch(e){
               console.error(`[catalog-search] ${a.name}/${catalogId} skip=${skip}: ${e.message}`);
               break;
             }
           }
-          return json(res,200,better({...requested,metas:merged}));
         }
-        return json(res,200,better({...requested,metas:direct}));
+        return json(res,200,better({...requested,metas:merged}));
       }
       return json(res,200,better(requested));
     }
