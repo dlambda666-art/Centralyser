@@ -23,3 +23,5 @@ jobs:
           repo_type: space
           space_sdk: docker
           private: false
+
+# Lab deploy workflow
