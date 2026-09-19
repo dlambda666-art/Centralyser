@@ -186,6 +186,13 @@ http.createServer(async (req,res)=>{
       }
       const searchText=extra.get('search')?.trim()||'';
       const requested=await fetchJson(endpoint(a,'catalog',type,catalogId,extra),15000);
+      // A search is a single global result set in Nuvio. FSE exposes the
+      // same search result through every selected genre catalog, so only
+      // expose the expanded search on the first selected catalog. Normal
+      // (non-search) catalog behaviour is untouched.
+      if(searchText && Array.isArray(a.selectedCatalogs) && a.selectedCatalogs.length && catalogId!==a.selectedCatalogs[0]){
+        return json(res,200,better({...requested,metas:[]}));
+      }
       if(searchText&&Array.isArray(requested?.metas)){
         const q=searchText.toLocaleLowerCase().split(/\\s+/).filter(Boolean);
         const matches=items=>Array.isArray(items?.metas)?items.metas.filter(m=>{
