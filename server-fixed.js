@@ -195,10 +195,8 @@ http.createServer(async (req,res)=>{
         const merged=[]; const seen=new Set();
         const add=items=>{for(const m of items||[]){const k=String(m?.id||m?.name||'');if(!k||seen.has(k))continue;seen.add(k);merged.push(m)}};
         add(matches(requested));
-        // FSE can limit a search to the current catalog. For a real search,
-        // also query the other selected FSE catalogs so older saga entries
-        // (often filed under Action/Adventure rather than "Derniers films")
-        // can be found without changing normal home feeds.
+        // Search the other selected catalogs too, but ONLY during an explicit
+        // search request. Normal catalog/home requests remain untouched.
         const selected=(a.selectedCatalogs||[]).filter(id=>id!==catalogId);
         const manifestCatalogs=(a.manifest?.catalogs||[]);
         for(const otherId of selected){
@@ -208,20 +206,6 @@ http.createServer(async (req,res)=>{
             const d=await fetchJson(endpoint(a,'catalog',type,otherId,extra),12000);
             add(matches(d));
           }catch(e){console.error(`[catalog-search] ${a.name}/${otherId}: ${e.message}`)}
-        }
-        // If the combined search still has only one match, inspect a few
-        // older pages of the current catalog as a final fallback.
-        if(merged.length<=1){
-          for(const skip of [100,200,300]){
-            try{
-              const page=await fetchJson(endpoint(a,'catalog',type,catalogId,new URLSearchParams([['skip',String(skip)]])),12000);
-              add(matches(page));
-              if(merged.length>=10)break;
-            }catch(e){
-              console.error(`[catalog-search] ${a.name}/${catalogId} skip=${skip}: ${e.message}`);
-              break;
-            }
-          }
         }
         return json(res,200,better({...requested,metas:merged}));
       }
@@ -233,4 +217,4 @@ http.createServer(async (req,res)=>{
   } catch(e){console.error(e);return json(res,502,{error:e.message})}
 }).listen(PORT,'0.0.0.0',()=>console.log(`Centralyser listening on ${PORT}`));
 
-async function buildManifest(){const catalogs=[],types=new Set();let hasStream=false;for(const addon of config.addons){try{const m=cache.has(addon.id)?cache.get(addon.id).data:(addon.manifest||await getManifest(addon));(m.types||[]).forEach(t=>types.add(t));for(const c of m.catalogs||[])if((addon.selectedCatalogs||[]).includes(c.id)){const extra=Array.isArray(c.extra)?[...c.extra]:[];if(!extra.some(e=>e&&e.name==='search'))extra.push({name:'search',isRequired:false});catalogs.push({...c,extra,id:`centralyser__${addon.id}__${c.id}`});}if(addon.streamEnabled&&supportsStream(m))hasStream=true}catch(e){console.error(`[manifest] ${addon.name}: ${e.message}`)}}return{id:'com.dlambda.centralyser',version:'1.0.2',name:'Centralyser',description:'Hub personnel configurable de catalogues et flux Stremio.',resources:hasStream?['catalog','meta','stream']:['catalog','meta'],types:[...types],catalogs}}
+async function buildManifest(){const catalogs=[],types=new Set();let hasStream=false;for(const addon of config.addons){try{const m=cache.has(addon.id)?cache.get(addon.id).data:(addon.manifest||await getManifest(addon));(m.types||[]).forEach(t=>types.add(t));for(const c of m.catalogs||[])if((addon.selectedCatalogs||[]).includes(c.id)){const extra=Array.isArray(c.extra)?[...c.extra]:[];if(!extra.some(e=>e&&e.name==='search'))extra.push({name:'search',isRequired:false});catalogs.push({...c,extra,id:`centralyser__${addon.id}__${c.id}`});}if(addon.streamEnabled&&supportsStream(m))hasStream=true}catch(e){console.error(`[manifest] ${addon.name}: ${e.message}`)}}return{id:'com.dlambda.centralyser',version:'1.0.0',name:'Centralyser',description:'Hub personnel configurable de catalogues et flux Stremio.',resources:hasStream?['catalog','meta','stream']:['catalog','meta'],types:[...types],catalogs}}
