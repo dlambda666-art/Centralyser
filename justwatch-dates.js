@@ -372,7 +372,7 @@ export const manifest = {
   description: "Ajoute les informations JustWatch à la fiche des films, avec la date de sortie numérique et les offres disponibles.",
   resources: ["catalog", "meta"],
   types: ["movie"],
-  idPrefixes: ["jwd:tmdb:", "tmdb:", "tt"],
+  idPrefixes: [],
   catalogs: [
     {
       type: "movie",
