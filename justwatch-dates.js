@@ -177,9 +177,12 @@ async function justwatchNewTitleDates(title) {
       throw new Error(data.errors.map(error => error.message).join("; "));
     }
     return (data?.data?.newTitleBuckets?.edges || [])
-      .map(edge => edge?.key?.date)
-      .filter(value => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(value || "")))
-      .map(value => String(value));
+      .map(edge => ({
+        date: edge?.key?.date,
+        service: edge?.key?.package?.clearName || edge?.key?.package?.shortName || null
+      }))
+      .filter(item => /^\d{4}-\d{2}-\d{2}$/.test(String(item.date || "")))
+      .map(item => ({ date: String(item.date), service: item.service }));
   } finally {
     clearTimeout(timer);
   }
@@ -271,6 +274,8 @@ async function enrichMovie(movie, outputId = null) {
   let digitalReleaseDate = null;
   let justWatchPath = null;
   let dateSource = "TMDB";
+  let dateService = null;
+  let dateCountry = null;
   let jw = null;
 
   if (JUSTWATCH_PARTNER_TOKEN) {
@@ -292,11 +297,15 @@ async function enrichMovie(movie, outputId = null) {
       );
       const releases = publicJw?.content?.upcomingReleases || [];
       const dates = releases
-        .map(item => item?.releaseDate)
-        .filter(value => /^\\d{4}-\\d{2}-\\d{2}/.test(String(value || "")))
-        .map(value => String(value).slice(0, 10))
-        .sort();
-      digitalReleaseDate = dates[0] || null;
+        .map(item => ({
+          date: String(item?.releaseDate || "").slice(0, 10),
+          service: item?.package?.clearName || item?.package?.shortName || null
+        }))
+        .filter(item => /^\d{4}-\d{2}-\d{2}$/.test(item.date))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      digitalReleaseDate = dates[0]?.date || null;
+      dateService = dates[0]?.service || null;
+      dateCountry = digitalReleaseDate ? REGION : null;
       justWatchPath = publicJw?.content?.fullPath || justWatchPath;
       if (digitalReleaseDate) dateSource = "JustWatch public";
     } catch (error) {
@@ -309,11 +318,17 @@ async function enrichMovie(movie, outputId = null) {
       const dates = await justwatchNewTitleDates(
         movie.title || movie.original_title || ""
       );
-      digitalReleaseDate = dates
-        .map(value => new Date(value))
-        .filter(date => !Number.isNaN(date.getTime()))
-        .sort((a, b) => Math.abs(a.getTime() - Date.now()) - Math.abs(b.getTime() - Date.now()))
-        .map(date => date.toISOString().slice(0, 10))[0] || null;
+      const sortedDates = dates
+        .map(item => ({
+          date: item.date,
+          service: item.service
+        }))
+        .map(item => ({ ...item, time: new Date(item.date).getTime() }))
+        .filter(item => !Number.isNaN(item.time))
+        .sort((a, b) => Math.abs(a.time - Date.now()) - Math.abs(b.time - Date.now()));
+      digitalReleaseDate = sortedDates[0]?.date || null;
+      dateService = sortedDates[0]?.service || null;
+      dateCountry = digitalReleaseDate ? "FR" : null;
       if (digitalReleaseDate) dateSource = "JustWatch new titles";
     } catch (error) {
       console.error(`[justwatch-new-titles] ${movie.id}: ${error.message}`);
@@ -323,6 +338,7 @@ async function enrichMovie(movie, outputId = null) {
   if (!digitalReleaseDate) {
     try {
       digitalReleaseDate = pickDigitalDate(await tmdb(`/movie/${movie.id}/release_dates`));
+      dateCountry = digitalReleaseDate ? REGION : dateCountry;
     } catch (error) {
       console.error(`[tmdb-release] ${movie.id}: ${error.message}`);
     }
@@ -333,6 +349,12 @@ async function enrichMovie(movie, outputId = null) {
   const jwUrl = justWatchPath
     ? (justWatchPath.startsWith("http") ? justWatchPath : `https://www.justwatch.com${justWatchPath}`)
     : justwatchSearchUrl(title, year);
+  const dateContext = [dateService, dateCountry === "FR" ? "France" : dateCountry]
+    .filter(Boolean)
+    .join(" — ");
+  const releaseLabel = digitalReleaseDate
+    ? `Sortie numérique : ${digitalReleaseDate}${dateContext ? ` — ${dateContext}` : ""}`
+    : "Sortie numérique : date inconnue";
 
   return {
     id: outputId || `jwd:tmdb:${movie.id}`,
@@ -345,17 +367,13 @@ async function enrichMovie(movie, outputId = null) {
       : year,
     released: movie.release_date ? `${movie.release_date}T00:00:00.000Z` : undefined,
     description: [
-      digitalReleaseDate
-        ? `Sortie numérique : ${digitalReleaseDate}`
-        : "Sortie numérique : date inconnue",
+      releaseLabel,
       movie.overview || ""
     ].filter(Boolean).join("\n\n"),
     website: jwUrl,
     links: [
       {
-        name: digitalReleaseDate
-          ? `Sortie numérique : ${digitalReleaseDate}`
-          : "Sortie numérique : date inconnue",
+        name: releaseLabel,
         category: "release"
       },
       { name: "JustWatch", category: "external", url: jwUrl }
