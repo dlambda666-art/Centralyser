@@ -88,11 +88,16 @@ function baseUrl(manifestUrl) {
   return u.toString().replace(/\/$/, "");
 }
 function endpoint(addon, kind, type, id, search) {
-  const u = new URL(`${baseUrl(addon.manifestUrl)}/${kind}/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`);
+  const entries = [...search];
+  const extra = kind === 'catalog' && entries.length
+    ? '/' + entries.map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&') + '.json'
+    : '.json';
+  const u = new URL(baseUrl(addon.manifestUrl) + '/' + kind + '/' + encodeURIComponent(type) + '/' + encodeURIComponent(id) + extra);
   // Preserve configuration/auth query parameters carried by personalized manifests.
   const manifestUrl = new URL(addon.manifestUrl);
   for (const [k, v] of manifestUrl.searchParams) u.searchParams.set(k, v);
-  for (const [k, v] of search) u.searchParams.set(k, v);
+  // Non-catalog resources may still carry query parameters.
+  if (kind !== 'catalog') for (const [k, v] of entries) u.searchParams.set(k, v);
   return u.toString();
 }
 function imdbId(item) {
