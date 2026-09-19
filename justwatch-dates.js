@@ -2,8 +2,8 @@ const TMDB_API_KEY = process.env.TMDB_API_KEY || "";
 const JUSTWATCH_PARTNER_TOKEN = process.env.JUSTWATCH_PARTNER_TOKEN || "";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const JW_BASE = "https://apis.justwatch.com/contentpartner/v2/content";
-const JW_LOCALE = process.env.JUSTWATCH_LOCALE || "fr_BE";
-const REGION = process.env.JUSTWATCH_REGION || "BE";
+const JW_LOCALE = process.env.JUSTWATCH_LOCALE || "fr_FR";
+const REGION = process.env.JUSTWATCH_REGION || "FR";
 const LANGUAGE = process.env.JUSTWATCH_LANGUAGE || "fr-FR";
 const TIMEOUT = 10000;
 
@@ -267,7 +267,7 @@ async function justwatchPublicGraphql(title, tmdbId) {
   }
 }
 
-async function enrichMovie(movie) {
+async function enrichMovie(movie, outputId = null) {
   let digitalReleaseDate = null;
   let justWatchPath = null;
   let dateSource = "TMDB";
@@ -335,7 +335,7 @@ async function enrichMovie(movie) {
     : justwatchSearchUrl(title, year);
 
   return {
-    id: `jwd:tmdb:${movie.id}`,
+    id: outputId || `jwd:tmdb:${movie.id}`,
     type: "movie",
     name: title,
     poster: poster(movie.poster_path),
@@ -430,24 +430,11 @@ export async function catalog(catalogId, extra = {}) {
 
 export async function meta(id) {
   const raw = String(id || "");
-  let tmdbId = null;
-
-  const tmdbMatch = /^jwd:tmdb:(\d+)$/.exec(raw) || /^tmdb:(\d+)$/.exec(raw);
-  if (tmdbMatch) {
-    tmdbId = tmdbMatch[1];
-  } else if (/^tt\d+$/.test(raw)) {
-    const found = await tmdb(`/find/${raw}`, {
-      external_source: "imdb_id",
-      language: LANGUAGE
-    });
-    tmdbId = found?.movie_results?.[0]?.id ? String(found.movie_results[0].id) : null;
-  }
-
-  if (!tmdbId) return { meta: null };
-
-  const movie = await tmdb(`/movie/${tmdbId}`, {
+  const match = /^(?:jwd:tmdb:|tmdb:)(\d+)$/.exec(raw);
+  if (!match) return { meta: null };
+  const movie = await tmdb(`/movie/${match[1]}`, {
     language: LANGUAGE,
     append_to_response: "external_ids"
   });
-  return { meta: await enrichMovie(movie) };
+  return { meta: await enrichMovie(movie, raw) };
 }
