@@ -123,7 +123,17 @@ async function buildManifest() {
     try {
       const manifest = await getAddonManifest(addon);
       for (const type of manifest.types || []) types.add(type);
-      for (const catalog of selectedCatalogs(addon, manifest)) catalogs.push({ ...catalog, id: `centralyser__${addon.id}__${catalog.id}` });
+      for (const catalog of selectedCatalogs(addon, manifest)) {
+        const extras = Array.isArray(catalog.extra) ? [...catalog.extra] : [];
+        if (!extras.some((extra) => extra && extra.name === "search")) {
+          extras.push({ name: "search", isRequired: false });
+        }
+        catalogs.push({
+          ...catalog,
+          extra: extras,
+          id: `centralyser__${addon.id}__${catalog.id}`,
+        });
+      }
     } catch (error) { console.error(`[manifest] ${addon.name}: ${error.message}`); }
   }
   return {
