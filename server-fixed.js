@@ -1,3 +1,4 @@
+import { manifest as justwatchManifest, catalog as justwatchCatalog, meta as justwatchMeta } from "./justwatch-dates.js";
 import http from "node:http";
 import { URL } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -138,6 +139,17 @@ http.createServer(async (req,res)=>{
     if(req.method==='OPTIONS'){res.writeHead(204,{'access-control-allow-origin':'*','access-control-allow-methods':'GET,POST,PUT,DELETE,OPTIONS','access-control-allow-headers':'content-type,x-centralyser-key'});return res.end()}
     if(u.pathname==='/'&&req.method==='GET'){res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});return res.end(page())}
     if(u.pathname==='/app.js'&&req.method==='GET'){res.writeHead(200,{'content-type':'application/javascript; charset=utf-8','cache-control':'no-store'});return res.end(APP_JS)}
+    if(u.pathname==='/justwatch/manifest.json'&&req.method==='GET')return json(res,200,{...justwatchManifest,endpoint:`${u.origin}/justwatch`});
+    if(p[0]==='justwatch'&&p[1]==='catalog'&&p.length===4&&p[3].endsWith('.json')&&req.method==='GET'){
+      const type=p[2],catalogId=decodeURIComponent(p[3].slice(0,-5));
+      if(type!=='movie')return json(res,404,{error:'Type non supporté'});
+      return json(res,200,await justwatchCatalog(catalogId,Object.fromEntries(u.searchParams.entries())));
+    }
+    if(p[0]==='justwatch'&&p[1]==='meta'&&p.length===4&&p[3].endsWith('.json')&&req.method==='GET'){
+      const type=p[2],id=decodeURIComponent(p[3].slice(0,-5));
+      if(type!=='movie')return json(res,404,{meta:null});
+      return json(res,200,await justwatchMeta(id));
+    }
     if(u.pathname==='/health'&&req.method==='GET')return json(res,200,{status:'ok',addon:'Centralyser',configuredAddons:config.addons.length,betterPoster:true,streamProviders:config.addons.filter(a=>a.streamEnabled).length})
     if(u.pathname==='/manifest.json'&&req.method==='GET')return json(res,200,await buildManifest())
     if(p[0]==='api'&&p[1]==='addons'){
