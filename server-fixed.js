@@ -163,8 +163,9 @@ http.createServer(async (req,res)=>{
       const type=decodeURIComponent(p[1]||'');
       const catalogToken=decodeURIComponent(p[2]||'');
       const dot=catalogToken.lastIndexOf('.json');
-      if(dot<0)return json(res,404,{error:'Catalogue inconnu'});
-      const rawId=catalogToken.slice(0,dot);
+      // Stremio search routes use /catalog/type/catalogId/search=query.json:
+      // the catalog id itself has no .json suffix in that form.
+      const rawId=dot>=0?catalogToken.slice(0,dot):catalogToken;
       const sep=rawId.indexOf('__');
       const sep2=sep<0?-1:rawId.indexOf('__',sep+2);
       if(!rawId.startsWith('centralyser__')||sep2<0)return json(res,404,{error:'Catalogue inconnu'});
