@@ -4,31 +4,25 @@ try {
   const p = './server-fixed.js';
   let s = await readFile(p, 'utf8');
 
-  // Keep upstream manifest reads resilient to transient 429/502/503/504 errors.
+  // Keep upstream manifest reads single-shot: do not amplify upstream 429s.
   const fetchStart = s.indexOf('async function fetchJson(url, timeout = MANIFEST_TIMEOUT) {');
-  const fetchEnd = s.indexOf('\n}\nfunction validManifest', fetchStart);
+  const fetchEnd = s.indexOf('\\n}\\nfunction validManifest', fetchStart);
   if (fetchStart !== -1 && fetchEnd !== -1) {
     const fetchReplacement = [
       'async function fetchJson(url, timeout = MANIFEST_TIMEOUT) {',
-      '  for (let attempt = 0; attempt < 3; attempt++) {',
-      '    const controller = new AbortController();',
-      '    const timer = setTimeout(() => controller.abort(), timeout);',
-      '    try {',
-      '      const r = await fetch(url, { headers: { accept: "application/json" }, redirect: "follow", signal: controller.signal });',
-      '      if (r.ok) return await r.json();',
-      '      if (![429, 502, 503, 504].includes(r.status) || attempt === 2) throw new Error(String(r.status) + " " + r.statusText);',
-      '      const retryAfter = Number(r.headers.get("retry-after") || 0);',
-      '      const delay = Math.min(Math.max(retryAfter * 1000, 1200 * (attempt + 1)), 6000);',
-      '      await new Promise(resolve => setTimeout(resolve, delay));',
-      '    } catch (e) {',
-      '      if (e?.name === "AbortError") {',
-      '        if (attempt === 2) throw new Error("Délai dépassé après " + (timeout / 1000) + "s");',
-      '      } else if (attempt === 2) throw e;',
-      '    } finally { clearTimeout(timer); }',
-      '  }',
+      '  const controller = new AbortController();',
+      '  const timer = setTimeout(() => controller.abort(), timeout);',
+      '  try {',
+      '    const r = await fetch(url, { headers: { accept: "application/json", "user-agent": "Centralyser/1.0" }, redirect: "follow", signal: controller.signal });',
+      '    if (!r.ok) throw new Error(String(r.status) + " " + r.statusText);',
+      '    return await r.json();',
+      '  } catch (e) {',
+      '    if (e?.name === "AbortError") throw new Error("Délai dépassé après " + (timeout / 1000) + "s");',
+      '    throw e;',
+      '  } finally { clearTimeout(timer); }',
       '}',
       ''
-    ].join('\n');
+    ].join('\\n');
     s = s.slice(0, fetchStart) + fetchReplacement + s.slice(fetchEnd + 2);
   }
 

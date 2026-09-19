@@ -123,7 +123,17 @@ async function buildManifest() {
     try {
       const manifest = await getAddonManifest(addon);
       for (const type of manifest.types || []) types.add(type);
-      for (const catalog of selectedCatalogs(addon, manifest)) catalogs.push({ ...catalog, id: `centralyser__${addon.id}__${catalog.id}` });
+      for (const catalog of selectedCatalogs(addon, manifest)) {
+        const extras = Array.isArray(catalog.extra) ? [...catalog.extra] : [];
+        if (!extras.some((extra) => extra && extra.name === "search")) {
+          extras.push({ name: "search", isRequired: false });
+        }
+        catalogs.push({
+          ...catalog,
+          extra: extras,
+          id: `centralyser__${addon.id}__${catalog.id}`,
+        });
+      }
     } catch (error) { console.error(`[manifest] ${addon.name}: ${error.message}`); }
   }
   return {
@@ -230,10 +240,22 @@ const server = http.createServer(async (req, res) => {
     if (requestUrl.pathname === "/manifest.json" && req.method === "GET") return sendJson(res, 200, await buildManifest());
     if (parts[0] === "api" && parts[1] === "addons") return handleApi(req, res, parts, requestUrl);
     if (req.method !== "GET") return sendJson(res, 405, { error: "Method not allowed" });
-    if (parts[0] === "catalog" && parts.length === 3 && parts[2].endsWith(".json")) {
-      const type = parts[1]; const parsed = parseCentralyserCatalogId(decodeURIComponent(parts[2].slice(0, -5))); if (!parsed) return sendJson(res, 404, { error: "Unknown Centralyser catalog" });
-      const addon = findAddon(parsed.addonId); if (!addon) return sendJson(res, 404, { error: "Unknown addon" });
-      return sendJson(res, 200, applyBetterPoster(await fetchJson(sourceCatalogUrl(addon, type, parsed.catalogId, requestUrl.searchParams))));
+    if (parts[0] === "catalog" && parts.length >= 3) {
+      const type = parts[1];
+      const catalogPart = decodeURIComponent(parts[2]);
+      const parsed = parseCentralyserCatalogId(catalogPart);
+      if (!parsed) return sendJson(res, 404, { error: "Unknown Centralyser catalog" });
+      const addon = findAddon(parsed.addonId);
+      if (!addon) return sendJson(res, 404, { error: "Unknown addon" });
+      const forwardedQuery = new URLSearchParams(requestUrl.searchParams);
+      if (parts.length > 3) {
+        const extraPath = parts.slice(3).join("&").replace(/\.json$/, "");
+        const extraQuery = new URLSearchParams(extraPath);
+        for (const [key, value] of extraQuery) forwardedQuery.set(key, value);
+      }
+      return sendJson(res, 200, applyBetterPoster(await fetchJson(
+        sourceCatalogUrl(addon, type, parsed.catalogId, forwardedQuery)
+      )));
     }
     if (parts[0] === "meta" && parts.length === 3 && parts[2].endsWith(".json")) {
       const type = parts[1]; const id = decodeURIComponent(parts[2].slice(0, -5));
